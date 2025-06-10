@@ -167,7 +167,7 @@ You can delete/modify this file at any moment to re-configure the tool.
 
 ```bash
 cd telegram_cleaner/src
-python -m telegram_cleaner
+python -m telegram_cleaner.main
 ```
 
 Step-by-step flow:
