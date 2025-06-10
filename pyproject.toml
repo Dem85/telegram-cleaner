@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram_cleaner"
+version = "0.1.0"
+description = "Telegram messages and reactions cleaner."
+requires-python = ">=3.8"
+
+authors = [
+    {name = "Alex Borontov"}
+]
+
+dependencies = [
+    "blessed==1.21.0",
+    "editor==1.6.6",
+    "inquirer==3.4.0",
+    "markdown-it-py==3.0.0",
+    "mdurl==0.1.2",
+    "pyaes==1.6.1",
+    "pygments==2.19.1",
+    "pyrogram==2.0.106",
+    "pysocks==1.7.1",
+    "readchar==4.2.1",
+    "rich==14.0.0",
+    "runs==1.2.2",
+    "setuptools==80.9.0",
+    "tgcrypto==1.2.5",
+    "typing-extensions==4.14.0",
+    "wcwidth==0.2.13",
+    "wheel==0.45.1",
+    "xmod==1.8.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black==25.1.0",
+    "flake8==7.2.0",
+    "isort==6.0.1",
+    "mypy==1.16.0",
+    "pre-commit==4.2.0",
+    "pylint==3.3.7",
+    "hypothesis>=6.135.4",
+]
+
+test = [
+    "pytest==8.4.0",
+    "pytest-cov==6.1.1",
+    "pytest-mock==3.14.1",
+    "pytest-asyncio==1.0.0",
+]
