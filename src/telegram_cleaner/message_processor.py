@@ -4,11 +4,12 @@ from abc import ABC, abstractmethod
 from itertools import chain
 from typing import TYPE_CHECKING
 
-from telethon.tl.functions.messages import SendReactionRequest
 from telethon import TelegramClient
-from telethon.tl.types import Channel, Chat, Message, User, ReactionEmpty
+from telethon.tl.functions.messages import SendReactionRequest
+from telethon.tl.types import Channel, Chat, Message, ReactionEmpty, User
 
 from telegram_cleaner.actions import Action
+from telegram_cleaner.error_handlers import retry_on_flood_wait
 
 if TYPE_CHECKING:
     from telegram_cleaner.constants import ChatEntity
@@ -139,11 +140,13 @@ class RemoveReactionsProcessor(MessageProcessor):
         if msg.reactions and any(
             [reaction.chosen_order is not None for reaction in msg.reactions.results]
         ):
-            await self.client(SendReactionRequest(
-                peer=self.chat,
-                msg_id=msg.id,
-                reaction=[ReactionEmpty()]
-            ))
+            await retry_on_flood_wait(
+                self.client(
+                    SendReactionRequest(
+                        peer=self.chat, msg_id=msg.id, reaction=[ReactionEmpty()]
+                    )
+                )
+            )
             to_continue = await super().process(msg=msg)
         return to_continue
 
@@ -179,8 +182,10 @@ class RemoveMessagesProcessor(MessageProcessor):
         chunk_size = 100
         for i in range(0, len(message_ids), chunk_size):
             chunk = message_ids[i : i + chunk_size]
-            await self.client.delete_messages(
-                entity=self.chat, message_ids=chunk, revoke=True
+            await retry_on_flood_wait(
+                self.client.delete_messages(
+                    entity=self.chat, message_ids=chunk, revoke=True
+                )
             )
         await super().finalize()
 
@@ -204,7 +209,9 @@ class RemoveMessagesProcessor(MessageProcessor):
 class LeaveGroupProcessor(MessageProcessor):
     async def finalize(self) -> None:
         if isinstance(self.chat, (Channel, Chat)):
-            await self.client.delete_dialog(entity=self.chat, revoke=False)
+            await retry_on_flood_wait(
+                self.client.delete_dialog(entity=self.chat, revoke=False)
+            )
 
         await super().finalize()
 
@@ -224,7 +231,9 @@ class LeaveGroupProcessor(MessageProcessor):
 class DeleteChatForBothProcessor(MessageProcessor):
     async def finalize(self) -> None:
         if isinstance(self.chat, User):
-            await self.client.delete_dialog(entity=self.chat, revoke=True)
+            await retry_on_flood_wait(
+                self.client.delete_dialog(entity=self.chat, revoke=True)
+            )
         await super().finalize()
 
     @property
@@ -247,7 +256,9 @@ class DeleteChatForBothProcessor(MessageProcessor):
 class DeleteChatOnlyForMeProcessor(MessageProcessor):
     async def finalize(self) -> None:
         if isinstance(self.chat, User):
-            await self.client.delete_dialog(entity=self.chat, revoke=False)
+            await retry_on_flood_wait(
+                self.client.delete_dialog(entity=self.chat, revoke=False)
+            )
         await super().finalize()
         ...
 

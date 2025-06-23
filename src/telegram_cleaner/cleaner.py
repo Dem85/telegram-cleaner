@@ -7,6 +7,7 @@ from telegram_cleaner import constants
 from telegram_cleaner.actions import get_available_actions
 from telegram_cleaner.config import Config
 from telegram_cleaner.constants import ChatEntity
+from telegram_cleaner.error_handlers import retry_on_flood_wait
 from telegram_cleaner.export import ExportBuffer
 from telegram_cleaner.message_processor import MessageProcessor
 from telegram_cleaner.ui import TerminalUI
@@ -53,7 +54,7 @@ class Cleaner:
     ) -> None:
         for picked_action in picked_actions:
             async with semaphore:
-                me = await self.client.get_me()
+                me = await retry_on_flood_wait(self.client.get_me())
                 processor_class = constants.ACTION_PROCESSOR_MAPPING.get(picked_action)
                 processor: MessageProcessor = processor_class(
                     export_buffer=(

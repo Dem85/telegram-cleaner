@@ -81,9 +81,7 @@ class TerminalUI:
             )
         return [chat for chat in chats if chat.id in picked_ids]
 
-    def pick_actions(
-        self, available_actions: list[Action]
-    ) -> list[Action]:
+    def pick_actions(self, available_actions: list[Action]) -> list[Action]:
         answer = (
             inquirer.prompt(
                 [
@@ -149,4 +147,7 @@ class TerminalUI:
             progress.update(task, completed=processed)
 
         await processor.finalize()
-        progress.update(task, completed=processed)
+        if processed:
+            progress.update(task, completed=processed)
+        else:
+            progress.update(task, completed=1, total=1)
