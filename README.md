@@ -12,16 +12,11 @@ Everything happens in an interactive, colourful TUI that shows live progress bar
 see what is going on.
 
 <p align="center">
-   <img src="assets/chats_and_actions.png"
+   <img src="assets/telegram_cleaner_demi.gif"
         alt="Telegram Cleaner – chats and actions"
         width="750">
 </p>
 
-<p align="center">
-   <img src="assets/progress.png"
-        alt="Telegram Cleaner – live progress bars"
-        width="750">
-</p>
 
 ## ✨ Features
 
