@@ -148,6 +148,6 @@ class TerminalUI:
 
         await processor.finalize()
         if processed:
-            progress.update(task, completed=processed)
+            progress.update(task, completed=processed, total=processed)
         else:
             progress.update(task, completed=1, total=1)
