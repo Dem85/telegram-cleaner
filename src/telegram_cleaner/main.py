@@ -10,7 +10,8 @@ from telegram_cleaner.config import Config
 from telegram_cleaner.export import ExportBuffer
 from telegram_cleaner.translations import Translator
 from telegram_cleaner.ui import TerminalUI
-from logging_setup import logging_configure
+from telegram_cleaner.logging_setup import logging_configure
+
 
 logging_configure()
 

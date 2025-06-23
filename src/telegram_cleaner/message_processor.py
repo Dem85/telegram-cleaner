@@ -176,15 +176,12 @@ class RemoveMessagesProcessor(MessageProcessor):
 
     async def finalize(self) -> None:
         message_ids = [msg.id for msg in self.cache[self.action.value][self.chat.id]]
-        print(message_ids)
         chunk_size = 100
         for i in range(0, len(message_ids), chunk_size):
             chunk = message_ids[i : i + chunk_size]
-            print(chunk)
             await self.client.delete_messages(
                 entity=self.chat, message_ids=chunk, revoke=True
             )
-            print("deleted")
         await super().finalize()
 
     @property
