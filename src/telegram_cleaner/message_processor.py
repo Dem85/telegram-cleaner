@@ -231,6 +231,14 @@ class LeaveGroupProcessor(MessageProcessor):
 class DeleteChatForBothProcessor(MessageProcessor):
     async def finalize(self) -> None:
         if isinstance(self.chat, User):
+            message_ids = [
+                msg.id for msg in self.cache[self.action.value][self.chat.id]
+            ]
+            await retry_on_flood_wait(
+                self.client.delete_messages(
+                    entity=self.chat, message_ids=message_ids, revoke=True
+                )
+            )
             await retry_on_flood_wait(
                 self.client.delete_dialog(entity=self.chat, revoke=True)
             )
@@ -246,7 +254,7 @@ class DeleteChatForBothProcessor(MessageProcessor):
 
     @property
     def stop_condition(self) -> any:
-        return True
+        return False
 
     @property
     def export_buffer_needed(self) -> bool:
@@ -256,11 +264,18 @@ class DeleteChatForBothProcessor(MessageProcessor):
 class DeleteChatOnlyForMeProcessor(MessageProcessor):
     async def finalize(self) -> None:
         if isinstance(self.chat, User):
+            message_ids = [
+                msg.id for msg in self.cache[self.action.value][self.chat.id]
+            ]
+            await retry_on_flood_wait(
+                self.client.delete_messages(
+                    entity=self.chat, message_ids=message_ids, revoke=False
+                )
+            )
             await retry_on_flood_wait(
                 self.client.delete_dialog(entity=self.chat, revoke=False)
             )
         await super().finalize()
-        ...
 
     @property
     def async_messages_iterator(self) -> any:
@@ -272,7 +287,7 @@ class DeleteChatOnlyForMeProcessor(MessageProcessor):
 
     @property
     def stop_condition(self) -> any:
-        return True
+        return False
 
     @property
     def export_buffer_needed(self) -> bool:
