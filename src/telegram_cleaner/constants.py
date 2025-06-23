@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Union
 
-from pyrogram.enums import ChatType
 from telethon.tl.types import Channel, Chat, User
 
 from telegram_cleaner.actions import Action
@@ -35,9 +34,6 @@ EXPORT_DIR.mkdir(exist_ok=True)
 LOG_DIR = Path("logs")
 LOG_PATH = LOG_DIR / "cleaner.log"
 LOG_DIR.mkdir(exist_ok=True)
-
-# telegram
-TELEGRAM_CHAT_TYPES = (ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP)
 
 # translations
 TRANSLATIONS = {
