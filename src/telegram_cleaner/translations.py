@@ -1,20 +1,18 @@
-from telegram_cleaner.config import get_config
-from telegram_cleaner.constants import TRANSLATIONS
+from telegram_cleaner import constants
 
 
-def _(key: str, **kwargs) -> str:
-    """Get translation for key."""
-    config = get_config()
-    translation = TRANSLATIONS.get(config.LANG, {}).get(key)
+class Translator:
+    """Translate text."""
 
-    # fallback -> english
-    if translation is None:
-        translation = TRANSLATIONS.get("en", {}).get(key)
+    def __init__(self, lang: str = "en") -> None:
+        self.lang = lang
 
-    if kwargs:
-        try:
+    def __call__(self, key: str, **kwargs: dict[str, str]) -> str:
+        """Get translation for key and format with kwargs."""
+        translation = constants.TRANSLATIONS.get(self.lang, {}).get(key)
+        # fallback -> english
+        if translation is None:
+            translation = constants.TRANSLATIONS.get("en", {}).get(key)
+        if kwargs:
             translation = translation.format(**kwargs)
-        except (KeyError, ValueError):
-            pass
-
-    return translation
+        return translation

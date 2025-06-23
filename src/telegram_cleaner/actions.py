@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 from enum import Enum
+from typing import TYPE_CHECKING
 
-import inquirer
-from pyrogram.enums import ChatType
-from pyrogram.types import Chat
+from telethon.tl.types import Channel, Chat, User
 
-from telegram_cleaner.translations import _
+if TYPE_CHECKING:
+    from telegram_cleaner.constants import ChatEntity
 
 
 class Action(str, Enum):
@@ -15,44 +17,22 @@ class Action(str, Enum):
     DELETE_MESSAGES = "action_delete_messages"
     DELETE_REACTIONS = "action_delete_reactions"
     LEAVE_GROUP = "action_leave_group"
-    DELETE_PRIVATE_SELF = "action_delete_private_self"
     DELETE_PRIVATE_BOTH = "action_delete_private_both"
+    DELETE_PRIVATE_SELF = "action_delete_private_self"
 
 
-class ActionPicker:
-    @staticmethod
-    def pick(chats: list[Chat]) -> list[Action]:
-        available = ActionPicker.get_available_actions(chats=chats)
-        answer = (
-            inquirer.prompt(
-                [
-                    inquirer.Checkbox(
-                        "actions",
-                        message=_("pick_actions"),
-                        choices=[(_(a.value), a) for a in available],
-                        carousel=True,
-                    )
-                ]
-            )
-            or {}
-        )
-        return answer.get("actions", [])
+def get_available_actions(chats: list["ChatEntity"]) -> list[Action]:
+    have_private = any(isinstance(chat, User) for chat in chats)
+    have_groups = any(isinstance(chat, (Channel, Chat)) for chat in chats)
 
-    @staticmethod
-    def get_available_actions(chats: list[Chat]) -> list[Action]:
-        have_private = any(chat.type == ChatType.PRIVATE for chat in chats)
-        have_groups = any(
-            c.type in (ChatType.GROUP, ChatType.SUPERGROUP) for c in chats
-        )
-
-        actions: list[Action] = [
-            Action.EXPORT_REACTIONS,
-            Action.EXPORT_MESSAGES,
-            Action.DELETE_REACTIONS,
-            Action.DELETE_MESSAGES,
-        ]
-        if have_groups:
-            actions.append(Action.LEAVE_GROUP)
-        if have_private:
-            actions.extend([Action.DELETE_PRIVATE_SELF, Action.DELETE_PRIVATE_BOTH])
-        return actions
+    actions: list[Action] = [
+        Action.EXPORT_REACTIONS,
+        Action.EXPORT_MESSAGES,
+        Action.DELETE_REACTIONS,
+        Action.DELETE_MESSAGES,
+    ]
+    if have_groups:
+        actions.append(Action.LEAVE_GROUP)
+    if have_private:
+        actions.extend([Action.DELETE_PRIVATE_BOTH, Action.DELETE_PRIVATE_SELF])
+    return actions

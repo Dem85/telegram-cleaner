@@ -10,7 +10,7 @@ from pyrogram.types import Chat, Message, MessageReactions
 from rich.progress import Progress
 
 from telegram_cleaner.formatting import Formatter
-from telegram_cleaner.main import Cleaner
+from telegram_cleaner.cleaner import Cleaner
 
 
 # Create a mock Config class

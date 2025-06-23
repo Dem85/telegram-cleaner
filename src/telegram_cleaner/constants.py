@@ -1,5 +1,23 @@
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Union
+
+from pyrogram.enums import ChatType
+from telethon.tl.types import Channel, Chat, User
+
+from telegram_cleaner.actions import Action
+from telegram_cleaner.message_processor import (
+    DeleteChatForBothProcessor,
+    DeleteChatOnlyForMeProcessor,
+    ExportMessagesProcessor,
+    ExportReactionsProcessor,
+    LeaveGroupProcessor,
+    RemoveMessagesProcessor,
+    RemoveReactionsProcessor,
+)
+
+# typing
+ChatEntity = Union[User, Chat, Channel]
 
 # config
 CONFIG_CACHE = Path(__file__).with_name("cache.json")
@@ -17,6 +35,9 @@ EXPORT_DIR.mkdir(exist_ok=True)
 LOG_DIR = Path("logs")
 LOG_PATH = LOG_DIR / "cleaner.log"
 LOG_DIR.mkdir(exist_ok=True)
+
+# telegram
+TELEGRAM_CHAT_TYPES = (ChatType.PRIVATE, ChatType.GROUP, ChatType.SUPERGROUP)
 
 # translations
 TRANSLATIONS = {
@@ -120,4 +141,14 @@ TRANSLATIONS = {
         "api_id_prompt": "Telegram API ID",
         "api_hash_prompt": "Telegram API hash",
     },
+}
+
+ACTION_PROCESSOR_MAPPING = {
+    Action.DELETE_MESSAGES: RemoveMessagesProcessor,
+    Action.DELETE_REACTIONS: RemoveReactionsProcessor,
+    Action.EXPORT_MESSAGES: ExportMessagesProcessor,
+    Action.EXPORT_REACTIONS: ExportReactionsProcessor,
+    Action.LEAVE_GROUP: LeaveGroupProcessor,
+    Action.DELETE_PRIVATE_BOTH: DeleteChatForBothProcessor,
+    Action.DELETE_PRIVATE_SELF: DeleteChatOnlyForMeProcessor,
 }

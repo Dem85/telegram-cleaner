@@ -1,6 +1,6 @@
 import logging
 
-from telegram_cleaner.constants import LOG_DIR, LOG_PATH
+from telegram_cleaner.constants import LOG_PATH
 
 
 def logging_configure() -> None:

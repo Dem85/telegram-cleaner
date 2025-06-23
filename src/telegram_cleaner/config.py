@@ -1,6 +1,5 @@
 import json
 from dataclasses import asdict, dataclass, field
-from functools import lru_cache
 
 from rich.prompt import Prompt
 
@@ -12,6 +11,7 @@ class Config:
     API_ID: int
     API_HASH: str
     LANG: str = field(default="en")
+    SIMULTANEOUS_PROCESSORS: int = field(default=3)
 
     def __post_init__(self) -> None:
         if not isinstance(self.API_ID, int):
@@ -45,8 +45,3 @@ class Config:
             except (ValueError, TypeError, json.JSONDecodeError) as e:
                 pass
         return cls._ask_user()
-
-
-@lru_cache(maxsize=1)
-def get_config() -> Config:
-    return Config.load()

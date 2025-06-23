@@ -391,6 +391,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/44/66/2c17bae31c906613795711fc78045c285048168919ace2220daa372c7d72/pyaes-1.6.1.tar.gz", hash = "sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312cc129c536d8f", size = 28536, upload-time = "2017-09-20T21:17:54.23Z" }
 
 [[package]]
+name = "pyasn1"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/e9/01f1a64245b89f039897cb0130016d79f77d52669aae6ee7b159a6c4c018/pyasn1-0.6.1.tar.gz", hash = "sha256:6f580d2bdd84365380830acf45550f2511469f673cb4a5ae3857a3170128b034", size = 145322, upload-time = "2024-09-10T22:41:42.55Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c8/f1/d6a797abb14f6283c0ddff96bbdd46937f64122b8c925cab503dd37f8214/pyasn1-0.6.1-py3-none-any.whl", hash = "sha256:0d632f46f2ba09143da3a8afe9e33fb6f92fa2320ab7e886e2d0f7672af84629", size = 83135, upload-time = "2024-09-11T16:00:36.122Z" },
+]
+
+[[package]]
 name = "pycodestyle"
 version = "2.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -433,19 +442,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1c/e4/83e487d3ddd64ab27749b66137b26dc0c5b5c161be680e6beffdc99070b3/pylint-3.3.7.tar.gz", hash = "sha256:2b11de8bde49f9c5059452e0c310c079c746a0a8eeaa789e5aa966ecc23e4559", size = 1520709, upload-time = "2025-05-04T17:07:51.089Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e8/83/bff755d09e31b5d25cc7fdc4bf3915d1a404e181f1abf0359af376845c24/pylint-3.3.7-py3-none-any.whl", hash = "sha256:43860aafefce92fca4cf6b61fe199cdc5ae54ea28f9bf4cd49de267b5195803d", size = 522565, upload-time = "2025-05-04T17:07:48.714Z" },
-]
-
-[[package]]
-name = "pyrogram"
-version = "2.0.106"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pyaes" },
-    { name = "pysocks" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/8e/5d09eca17271320bb9a95e50b7e053770aee85b3fd338e8267e7b6b280ae/Pyrogram-2.0.106.tar.gz", hash = "sha256:30202995758fcb6e0f91224704ab7fedefea454297724bd70a6a71a23748c16f", size = 345997, upload-time = "2023-04-30T18:24:45.506Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/88/502ec24914d208e06baa6f27ff812f46815bb4f302018ad848ebf518abdf/Pyrogram-2.0.106-py3-none-any.whl", hash = "sha256:32b62b3d93030b1080cbe45b88c0e8790cf4e2179cf3321ede810d48edf97bc7", size = 3573685, upload-time = "2023-04-30T18:24:41.986Z" },
 ]
 
 [[package]]
@@ -559,6 +555,18 @@ wheels = [
 ]
 
 [[package]]
+name = "rsa"
+version = "4.9.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyasn1" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/da/8a/22b7beea3ee0d44b1916c0c1cb0ee3af23b700b6da9f04991899d0c555d4/rsa-4.9.1.tar.gz", hash = "sha256:e7bdbfdb5497da4c07dfd35530e1a902659db6ff241e39d9953cad06ebd0ae75", size = 29034, upload-time = "2025-04-16T09:51:18.218Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/8d/0133e4eb4beed9e425d9a98ed6e081a55d195481b7632472be1af08d2f6b/rsa-4.9.1-py3-none-any.whl", hash = "sha256:68635866661c6836b8d39430f97a996acbd61bfa49406748ea243539fe239762", size = 34696, upload-time = "2025-04-16T09:51:17.142Z" },
+]
+
+[[package]]
 name = "runs"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -600,12 +608,12 @@ dependencies = [
     { name = "mdurl" },
     { name = "pyaes" },
     { name = "pygments" },
-    { name = "pyrogram" },
     { name = "pysocks" },
     { name = "readchar" },
     { name = "rich" },
     { name = "runs" },
     { name = "setuptools" },
+    { name = "telethon" },
     { name = "tgcrypto" },
     { name = "typing-extensions" },
     { name = "wcwidth" },
@@ -617,6 +625,7 @@ dependencies = [
 dev = [
     { name = "black" },
     { name = "flake8" },
+    { name = "hypothesis" },
     { name = "isort" },
     { name = "mypy" },
     { name = "pre-commit" },
@@ -629,46 +638,52 @@ test = [
     { name = "pytest-mock" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "hypothesis" },
-]
-
 [package.metadata]
 requires-dist = [
-    { name = "black", marker = "extra == 'dev'" },
-    { name = "blessed" },
-    { name = "editor" },
-    { name = "flake8", marker = "extra == 'dev'" },
-    { name = "inquirer" },
-    { name = "isort", marker = "extra == 'dev'" },
-    { name = "markdown-it-py" },
-    { name = "mdurl" },
-    { name = "mypy", marker = "extra == 'dev'" },
-    { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "pyaes" },
-    { name = "pygments" },
-    { name = "pylint", marker = "extra == 'dev'" },
-    { name = "pyrogram" },
-    { name = "pysocks" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "pytest-asyncio", marker = "extra == 'test'" },
-    { name = "pytest-cov", marker = "extra == 'test'" },
-    { name = "pytest-mock", marker = "extra == 'test'" },
-    { name = "readchar" },
-    { name = "rich" },
-    { name = "runs" },
-    { name = "setuptools" },
-    { name = "tgcrypto" },
-    { name = "typing-extensions" },
-    { name = "wcwidth" },
-    { name = "wheel" },
-    { name = "xmod" },
+    { name = "black", marker = "extra == 'dev'", specifier = "==25.1.0" },
+    { name = "blessed", specifier = "==1.21.0" },
+    { name = "editor", specifier = "==1.6.6" },
+    { name = "flake8", marker = "extra == 'dev'", specifier = "==7.2.0" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.135.4" },
+    { name = "inquirer", specifier = "==3.4.0" },
+    { name = "isort", marker = "extra == 'dev'", specifier = "==6.0.1" },
+    { name = "markdown-it-py", specifier = "==3.0.0" },
+    { name = "mdurl", specifier = "==0.1.2" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.16.0" },
+    { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.2.0" },
+    { name = "pyaes", specifier = "==1.6.1" },
+    { name = "pygments", specifier = "==2.19.1" },
+    { name = "pylint", marker = "extra == 'dev'", specifier = "==3.3.7" },
+    { name = "pysocks", specifier = "==1.7.1" },
+    { name = "pytest", marker = "extra == 'test'", specifier = "==8.4.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = "==1.0.0" },
+    { name = "pytest-cov", marker = "extra == 'test'", specifier = "==6.1.1" },
+    { name = "pytest-mock", marker = "extra == 'test'", specifier = "==3.14.1" },
+    { name = "readchar", specifier = "==4.2.1" },
+    { name = "rich", specifier = "==14.0.0" },
+    { name = "runs", specifier = "==1.2.2" },
+    { name = "setuptools", specifier = "==80.9.0" },
+    { name = "telethon", specifier = ">=1.40.0" },
+    { name = "tgcrypto", specifier = "==1.2.5" },
+    { name = "typing-extensions", specifier = "==4.14.0" },
+    { name = "wcwidth", specifier = "==0.2.13" },
+    { name = "wheel", specifier = "==0.45.1" },
+    { name = "xmod", specifier = "==1.8.1" },
 ]
 provides-extras = ["dev", "test"]
 
-[package.metadata.requires-dev]
-dev = [{ name = "hypothesis", specifier = ">=6.135.4" }]
+[[package]]
+name = "telethon"
+version = "1.40.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyaes" },
+    { name = "rsa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/58/af/9b7111e3f63fffe8e55b7ceb8bda023173e2052f420b6debcb25fd2fbc15/telethon-1.40.0.tar.gz", hash = "sha256:40e83326877a2e68b754d4b6d0d1ca5ac924110045b039e02660f2d67add97db", size = 646723, upload-time = "2025-04-21T09:12:10.506Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2c/5a/c5370edb3215d19a6e858f4169b8eec725ba55f9d39df0f557508048c037/Telethon-1.40.0-py3-none-any.whl", hash = "sha256:146fd4cb2a7afa66bc67f9c2167756096a37b930f65711a3e7399ec9874dcfa7", size = 722013, upload-time = "2025-04-21T09:12:08.399Z" },
+]
 
 [[package]]
 name = "tgcrypto"
