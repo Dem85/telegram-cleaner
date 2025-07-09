@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from functools import cached_property
 from itertools import chain
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from telethon.tl.types import Channel, Chat, Message, ReactionEmpty, User
 
 from telegram_cleaner.actions import Action
 from telegram_cleaner.error_handlers import retry_on_flood_wait
+from telegram_cleaner import constants
 
 if TYPE_CHECKING:
     from telegram_cleaner.constants import ChatEntity
@@ -24,6 +26,7 @@ class MessageProcessor(ABC):
         action: Action,
         cache: dict,
         me,
+        simultaneous_processors,
         export_buffer: ExportBuffer | None = None,
     ):
         self.client = client
@@ -32,6 +35,11 @@ class MessageProcessor(ABC):
         self.export_buffer = export_buffer
         self.cache = cache
         self.me = me
+        self.simultaneous_processors = simultaneous_processors
+
+    @cached_property
+    def wait_time(self):
+        return constants.SAFE_TELEGRAM_WAIT_TIME * self.simultaneous_processors
 
     async def process(self, msg: Message) -> bool:
         to_continue = True
@@ -98,7 +106,7 @@ class ExportReactionsProcessor(MessageProcessor):
 
     @property
     def async_messages_iterator(self) -> any:
-        return self.client.iter_messages(entity=self.chat.id)
+        return self.client.iter_messages(entity=self.chat.id, wait_time=self.wait_time)
 
     @property
     def stop_condition(self) -> any:
@@ -123,7 +131,7 @@ class ExportMessagesProcessor(MessageProcessor):
 
     @property
     def async_messages_iterator(self) -> any:
-        return self.client.iter_messages(entity=self.chat.id, from_user=self.me.id)
+        return self.client.iter_messages(entity=self.chat.id, from_user=self.me.id, wait_time=self.wait_time)
 
     @property
     def stop_condition(self) -> any:
@@ -157,7 +165,7 @@ class RemoveReactionsProcessor(MessageProcessor):
 
     @property
     def async_messages_iterator(self) -> any:
-        return self.client.iter_messages(entity=self.chat.id)
+        return self.client.iter_messages(entity=self.chat.id, wait_time=self.wait_time)
 
     @property
     def stop_condition(self) -> any:
@@ -191,7 +199,7 @@ class RemoveMessagesProcessor(MessageProcessor):
 
     @property
     def async_messages_iterator(self) -> any:
-        return self.client.iter_messages(entity=self.chat.id, from_user=self.me.id)
+        return self.client.iter_messages(entity=self.chat.id, from_user=self.me.id, wait_time=self.wait_time)
 
     @property
     def stop_condition(self) -> any:
@@ -217,7 +225,7 @@ class LeaveGroupProcessor(MessageProcessor):
 
     @property
     def async_messages_iterator(self) -> any:
-        return self.client.iter_messages(entity=self.chat.id)
+        return self.client.iter_messages(entity=self.chat.id, wait_time=self.wait_time)
 
     @property
     def stop_condition(self) -> any:
@@ -249,7 +257,7 @@ class DeleteChatForBothProcessor(MessageProcessor):
         return (
             self._iter_from_cache()
             if self.cached
-            else self.client.iter_messages(entity=self.chat.id)
+            else self.client.iter_messages(entity=self.chat.id, wait_time=self.wait_time)
         )
 
     @property
@@ -282,7 +290,7 @@ class DeleteChatOnlyForMeProcessor(MessageProcessor):
         return (
             self._iter_from_cache()
             if self.cached
-            else self.client.iter_messages(entity=self.chat.id)
+            else self.client.iter_messages(entity=self.chat.id, wait_time=self.wait_time)
         )
 
     @property

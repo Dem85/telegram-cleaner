@@ -10,7 +10,7 @@ def logging_configure() -> None:
 
     # write error/warning/info logs to file
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
         handlers=[logging.FileHandler(LOG_PATH, encoding="utf-8")],
     )

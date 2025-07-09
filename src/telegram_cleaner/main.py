@@ -19,12 +19,17 @@ async def main() -> None:
     config = Config.load()
     terminal_ui = TerminalUI(console=Console(), translator=Translator(config.LANG))
     client = TelegramClient(
-        session="cleaner_session", api_id=config.API_ID, api_hash=config.API_HASH
+        session="cleaner_session",
+        api_id=config.API_ID,
+        api_hash=config.API_HASH,
+        app_version="1.2.3",
+        device_model="PC",
+        system_version="Linux"
     )
     export_buffer = ExportBuffer()
     cache = defaultdict(partial(defaultdict, list))
     async with Cleaner(
-        config=config, terminal_ui=terminal_ui, client=client
+        config=config, terminal_ui=terminal_ui, client=client,
     ) as cleaner:
         await cleaner.run(export_buffer=export_buffer, cache=cache)
 

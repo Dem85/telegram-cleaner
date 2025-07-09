@@ -39,8 +39,13 @@ class Cleaner:
         if not confirmation:
             return
 
+        if len(picked_chats) < self.config.SIMULTANEOUS_PROCESSORS:
+            simultaneous_processors = len(picked_chats)
+        else:
+            simultaneous_processors = self.config.SIMULTANEOUS_PROCESSORS
+
         await self._process_chats(
-            simultaneous_processors=self.config.SIMULTANEOUS_PROCESSORS,
+            simultaneous_processors=simultaneous_processors,
             picked_chats=picked_chats,
             picked_actions=picked_actions,
             export_buffer=export_buffer,
@@ -50,7 +55,7 @@ class Cleaner:
         self.terminal_ui.show_completed()
 
     async def process_actions_with_semaphore(
-        self, *, picked_chat, picked_actions, semaphore, export_buffer, progress, cache
+        self, *, picked_chat, picked_actions, semaphore, export_buffer, progress, cache, simultaneous_processors,
     ) -> None:
         for picked_action in picked_actions:
             async with semaphore:
@@ -65,6 +70,7 @@ class Cleaner:
                     action=picked_action,
                     cache=cache,
                     me=me,
+                    simultaneous_processors=simultaneous_processors,
                 )
                 await self.terminal_ui.scan(processor=processor, progress=progress)
 
@@ -87,6 +93,7 @@ class Cleaner:
                         export_buffer=export_buffer,
                         progress=progress,
                         cache=cache,
+                        simultaneous_processors=simultaneous_processors,
                     )
                     for chat in picked_chats
                 )

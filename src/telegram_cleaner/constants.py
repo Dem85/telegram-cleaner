@@ -15,6 +15,9 @@ from telegram_cleaner.message_processor import (
     RemoveReactionsProcessor,
 )
 
+# telegram
+SAFE_TELEGRAM_WAIT_TIME = 3.5
+
 # typing
 ChatEntity = Union[User, Chat, Channel]
 
