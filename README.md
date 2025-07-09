@@ -191,6 +191,7 @@ Adjust it easily by editing `Formatter.format_export_line()`.
 
 * Add a new language or change the existing one - edit `constants.TRANSLATIONS`.
 * Logs can be found in `logs/cleaner.log`.
+* This is not recommended, but you can reduce `SAFE_TELEGRAM_WAIT_TIME` to speed up message processing.
 
 
 
