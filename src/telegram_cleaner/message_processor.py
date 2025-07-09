@@ -119,9 +119,7 @@ class ExportReactionsProcessor(MessageProcessor):
 
 class ExportMessagesProcessor(MessageProcessor):
     async def process(self, msg: Message):
-        to_continue = False
-        if msg.from_id.user_id == self.me.id:
-            to_continue = await super().process(msg=msg)
+        to_continue = await super().process(msg=msg)
         return to_continue
 
     async def finalize(self) -> None:
