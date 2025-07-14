@@ -59,7 +59,7 @@ class Cleaner:
     ) -> None:
         for picked_action in picked_actions:
             async with semaphore:
-                me = await retry_on_flood_wait(self.client.get_me())
+                me = await retry_on_flood_wait(self.client.get_me)
                 processor_class = constants.ACTION_PROCESSOR_MAPPING.get(picked_action)
                 processor: MessageProcessor = processor_class(
                     export_buffer=(

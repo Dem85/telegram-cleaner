@@ -147,10 +147,9 @@ class RemoveReactionsProcessor(MessageProcessor):
             [reaction.chosen_order is not None for reaction in msg.reactions.results]
         ):
             await retry_on_flood_wait(
-                self.client(
-                    SendReactionRequest(
-                        peer=self.chat, msg_id=msg.id, reaction=[ReactionEmpty()]
-                    )
+                self.client,
+                SendReactionRequest(
+                    peer=self.chat, msg_id=msg.id, reaction=[ReactionEmpty()]
                 )
             )
             to_continue = await super().process(msg=msg)
@@ -189,9 +188,8 @@ class RemoveMessagesProcessor(MessageProcessor):
         for i in range(0, len(message_ids), chunk_size):
             chunk = message_ids[i : i + chunk_size]
             await retry_on_flood_wait(
-                self.client.delete_messages(
-                    entity=self.chat, message_ids=chunk, revoke=True
-                )
+                self.client.delete_messages,
+                entity=self.chat, message_ids=chunk, revoke=True
             )
         await super().finalize()
 
@@ -216,7 +214,7 @@ class LeaveGroupProcessor(MessageProcessor):
     async def finalize(self) -> None:
         if isinstance(self.chat, (Channel, Chat)):
             await retry_on_flood_wait(
-                self.client.delete_dialog(entity=self.chat, revoke=False)
+                self.client.delete_dialog, entity=self.chat, revoke=False
             )
 
         await super().finalize()
@@ -241,12 +239,11 @@ class DeleteChatForBothProcessor(MessageProcessor):
                 msg.id for msg in self.cache[self.action.value][self.chat.id]
             ]
             await retry_on_flood_wait(
-                self.client.delete_messages(
-                    entity=self.chat, message_ids=message_ids, revoke=True
-                )
+                self.client.delete_messages,
+                entity=self.chat, message_ids=message_ids, revoke=True
             )
             await retry_on_flood_wait(
-                self.client.delete_dialog(entity=self.chat, revoke=True)
+                self.client.delete_dialog, entity=self.chat, revoke=True
             )
         await super().finalize()
 
@@ -274,12 +271,10 @@ class DeleteChatOnlyForMeProcessor(MessageProcessor):
                 msg.id for msg in self.cache[self.action.value][self.chat.id]
             ]
             await retry_on_flood_wait(
-                self.client.delete_messages(
-                    entity=self.chat, message_ids=message_ids, revoke=False
-                )
+                self.client.delete_messages, entity=self.chat, message_ids=message_ids, revoke=False
             )
             await retry_on_flood_wait(
-                self.client.delete_dialog(entity=self.chat, revoke=False)
+                self.client.delete_dialog, entity=self.chat, revoke=False
             )
         await super().finalize()
 
