@@ -84,10 +84,17 @@ uv pip install -e .[dev,test]
 
 ### 2. Windows (PowerShell / cmd.exe)
 
+Preliminary check: Ensure Python is installed (version 3.8+ for uv). In your terminal, run python --version. If the command is not found:
+- Try py --version (if Python Launcher is available).
+- Or use the full path to python.exe (e.g., C:\Python311\python.exe --version).
+- If nothing works, add Python to PATH: reinstall Python with the "Add Python to PATH" option or manually configure environment variables.
+
+Next, **depending on which command worked for you**, use `python` / `py` / `full path to python` in terminal. In the instructions, I use `python` for simplicity's sake.
+
 1. Install **pipx**
 
 ```bash
-py -m pip install --user pipx
+python -m pip install --user pipx
 ```
 
 ```bash
@@ -102,8 +109,10 @@ pipx install uv
 
 3. Create & activate a virtual environment
 
+**Navigate to the project folder**: Before creating the virtual environment and installing the package, change to your project's directory (where the pyproject.toml is located). Use the command `cd path_to_folder` (e.g., `cd C:\Projects\telegram-cleaner`). This is necessary for commands like `uv pip install .` to work correctly relative to the current directory.
+
 ```bash
-py -m venv .venv
+python -m venv .venv
 ```
 
 ```bash
@@ -155,8 +164,9 @@ You can delete/modify this file at any moment to re-configure the tool.
 
 ## ▶️ Usage
 
+From the project folder, execute the command:
+
 ```bash
-cd telegram_cleaner/src
 python -m telegram_cleaner.main
 ```
 
