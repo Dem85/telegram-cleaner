@@ -184,10 +184,10 @@ Step-by-step flow:
 Each line is plain text:
 
 ```
-[YYYY-MM-DD HH:MM:SS] Chat Title | id=123456 | First 200 characters of the message
+[YYYY-MM-DD HH:MM:SS] Chat Title | id=123456 | Message text
 ```
 
-Adjust it easily by editing `Formatter.format_export_line()`.
+Adjust it easily by editing `ExportBuffer.format_line()`.
 
 
 ## 🤖 Under the hood

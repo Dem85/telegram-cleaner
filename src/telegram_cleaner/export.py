@@ -40,6 +40,6 @@ class ExportBuffer:
 
     def format_line(self, msg: Message, chat: ChatEntity) -> str:
         txt = msg.text or ""
-        message_preview = txt.replace("\n", " ")[:200]
+        message_preview = txt.replace("\n", " ")
         ts = msg.date.astimezone().strftime("%Y-%m-%d %H:%M:%S")
         return f"[{ts}] {get_display_name(chat)} | id={msg.id} | {message_preview}"
