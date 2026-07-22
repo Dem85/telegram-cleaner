@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from itertools import chain
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from telethon import TelegramClient
 from telethon.tl.functions.messages import SendReactionRequest
@@ -359,14 +362,39 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
     async def _run_batch_analysis(self) -> None:
         """Run batch analysis on all pending messages."""
         if not self._pending_messages:
+            logger.debug("No pending messages for batch analysis")
             return
+
+        msg_ids = [mid for mid, _ in self._pending_messages]
+        logger.debug(
+            "Starting batch analysis: %d messages, ids=%s",
+            len(self._pending_messages),
+            msg_ids[:10],
+        )
+        if len(msg_ids) > 10:
+            logger.debug("... and %d more messages", len(msg_ids) - 10)
 
         texts = [text for _, text in self._pending_messages]
         results = await self._ai_agent.analyze_batch(texts)
 
+        violations_found = 0
         for (msg_id, _), result in zip(self._pending_messages, results):
             if result.is_violation:
                 self._violation_message_ids.append(msg_id)
+                violations_found += 1
+                logger.debug(
+                    "VIOLATION DETECTED: msg_id=%s, articles=%s, confidence=%.2f, reason=%s",
+                    msg_id,
+                    result.articles,
+                    result.confidence,
+                    result.reason,
+                )
+
+        logger.debug(
+            "Batch analysis completed: %d processed, %d violations found",
+            len(self._pending_messages),
+            violations_found,
+        )
 
         self._pending_messages.clear()
 
@@ -381,11 +409,19 @@ class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
     async def process(self, msg: Message) -> bool:
         text = self._get_message_text(msg)
         if not text:
+            logger.debug("Skipping empty text message: msg_id=%s", msg.id)
             return True  # skip empty messages
 
         # Buffer the message for batch analysis
         self._pending_messages.append((msg.id, text))
         self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered text message for AI analysis: msg_id=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            len(text),
+            text[:100],
+        )
 
         return True
 
@@ -411,6 +447,7 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
     async def process(self, msg: Message) -> bool:
         text = self._get_message_text(msg)
         if not text and not self._has_media(msg):
+            logger.debug("Skipping empty message (no text, no media): msg_id=%s", msg.id)
             return True  # skip empty messages
 
         # For media messages, include media type info in analysis
@@ -422,6 +459,14 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
         # Buffer the message for batch analysis
         self._pending_messages.append((msg.id, analysis_text))
         self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered message for AI analysis: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            self._has_media(msg),
+            len(analysis_text),
+            analysis_text[:100],
+        )
 
         return True
 
@@ -496,6 +541,12 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         # Run batch analysis on all pending messages (user's own messages only)
         await self._run_batch_analysis()
 
+        logger.debug(
+            "AI analysis complete: %d violations found out of %d pending messages",
+            len(self._violation_message_ids),
+            len(self._pending_messages) + len(self._violation_message_ids),
+        )
+
         # Collect related messages for each violation
         related_minutes = self._get_related_minutes()
         for violation_id in self._violation_message_ids:
@@ -544,18 +595,30 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         # Combine violation and related message ids
         all_to_delete = set(self._violation_message_ids) | self._related_message_ids
 
+        logger.debug(
+            "Collected %d related messages for %d violations, total to delete: %d",
+            len(self._related_message_ids),
+            len(self._violation_message_ids),
+            len(all_to_delete),
+        )
+
         # Delete all collected messages (revoke=True = delete for everyone)
         if all_to_delete:
             chunk_size = 100
             ids_list = sorted(all_to_delete)
+            logger.debug("Deleting %d messages in chunks of %d", len(ids_list), chunk_size)
             for i in range(0, len(ids_list), chunk_size):
                 chunk = ids_list[i : i + chunk_size]
+                logger.debug("Deleting chunk: ids=%s", chunk)
                 await retry_on_flood_wait(
                     self.client.delete_messages,
                     entity=self.chat,
                     message_ids=chunk,
                     revoke=True,
                 )
+            logger.debug("Successfully deleted all %d messages", len(ids_list))
+        else:
+            logger.debug("No messages to delete")
 
     def _get_related_minutes(self) -> int:
         """Get the time window in minutes for related messages."""
@@ -587,15 +650,24 @@ class AIAnalyzeAndDeleteTextProcessor(BaseAIAnalyzeAndDeleteProcessor):
 
         text = self._get_message_text(msg)
         if not text:
+            logger.debug("Skipping empty text message (delete mode): msg_id=%s", msg.id)
             return True
 
         # Only analyze user's own messages
         if msg.sender_id != self.me.id:
+            logger.debug("Skipping other user's message (delete mode): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
         # Buffer the message for batch analysis
         self._pending_messages.append((msg.id, text))
         self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered own text message for AI analysis + delete: msg_id=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            len(text),
+            text[:100],
+        )
 
         return True
 
@@ -619,10 +691,12 @@ class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
 
         text = self._get_message_text(msg)
         if not text and not self._has_media(msg):
+            logger.debug("Skipping empty message (delete mode, all): msg_id=%s", msg.id)
             return True
 
         # Only analyze user's own messages
         if msg.sender_id != self.me.id:
+            logger.debug("Skipping other user's message (delete mode, all): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
         analysis_text = text
@@ -632,6 +706,14 @@ class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
         # Buffer the message for batch analysis
         self._pending_messages.append((msg.id, analysis_text))
         self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered own message for AI analysis + delete: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            self._has_media(msg),
+            len(analysis_text),
+            analysis_text[:100],
+        )
 
         return True
 
@@ -677,15 +759,24 @@ class AIAnalyzeAndDeleteWithRelatedTextProcessor(BaseAIAnalyzeAndDeleteWithRelat
 
         text = self._get_message_text(msg)
         if not text:
+            logger.debug("Skipping empty text message (delete+related mode): msg_id=%s", msg.id)
             return True
 
         # Only analyze user's own messages
         if msg.sender_id != self.me.id:
+            logger.debug("Skipping other user's message (delete+related mode): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
         # Buffer the message for batch analysis
         self._pending_messages.append((msg.id, text))
         self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered own text message for AI analysis + delete+related: msg_id=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            len(text),
+            text[:100],
+        )
 
         return True
 
@@ -707,10 +798,12 @@ class AIAnalyzeAndDeleteWithRelatedAllProcessor(BaseAIAnalyzeAndDeleteWithRelate
 
         text = self._get_message_text(msg)
         if not text and not self._has_media(msg):
+            logger.debug("Skipping empty message (delete+related mode, all): msg_id=%s", msg.id)
             return True
 
         # Only analyze user's own messages
         if msg.sender_id != self.me.id:
+            logger.debug("Skipping other user's message (delete+related mode, all): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
         analysis_text = text
@@ -720,6 +813,14 @@ class AIAnalyzeAndDeleteWithRelatedAllProcessor(BaseAIAnalyzeAndDeleteWithRelate
         # Buffer the message for batch analysis
         self._pending_messages.append((msg.id, analysis_text))
         self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered own message for AI analysis + delete+related: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            self._has_media(msg),
+            len(analysis_text),
+            analysis_text[:100],
+        )
 
         return True
 

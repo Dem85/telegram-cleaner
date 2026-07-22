@@ -331,6 +331,7 @@ class AIAgent:
             List of AIAnalysisResult in the same order as input texts.
         """
         if not texts:
+            logger.debug("analyze_texts_batch: empty texts list")
             return []
 
         await self._ensure_initialized()
@@ -340,6 +341,12 @@ class AIAgent:
             (i, t) for i, t in enumerate(texts) if t and t.strip()
         ]
 
+        logger.debug(
+            "analyze_texts_batch: %d total texts, %d non-empty",
+            len(texts),
+            len(non_empty),
+        )
+
         # Pre-fill results for empty texts
         results: list[AIAnalysisResult] = [
             AIAnalysisResult(is_violation=False, confidence=0.0)
@@ -347,6 +354,7 @@ class AIAgent:
         ]
 
         if not non_empty:
+            logger.debug("analyze_texts_batch: all texts are empty, returning defaults")
             if progress_callback:
                 progress_callback(len(texts), len(texts))
             return results
@@ -355,6 +363,12 @@ class AIAgent:
         batch_payload = json.dumps(
             [{"id": idx, "text": text} for idx, text in non_empty],
             ensure_ascii=False,
+        )
+
+        logger.debug(
+            "Sending batch request to LLM: %d messages, payload_size=%d bytes",
+            len(non_empty),
+            len(batch_payload),
         )
 
         if self.config.ai_debug:
@@ -366,6 +380,11 @@ class AIAgent:
         try:
             raw_response = await self._call_llm_batch(batch_payload)
 
+            logger.debug(
+                "Received batch response from LLM: response_size=%d bytes",
+                len(raw_response),
+            )
+
             if self.config.ai_debug:
                 logger.info("=== AI DEBUG: Batch Response ===\n%s", raw_response)
                 console.print("[bold cyan]━━━ AI DEBUG: Batch Response ━━━[/bold cyan]")
@@ -373,6 +392,11 @@ class AIAgent:
                 console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
 
             parsed = self._parse_batch_response(raw_response)
+
+            logger.debug(
+                "Parsed batch response: %d results",
+                len(parsed),
+            )
 
             # Map results back to original positions
             for item in parsed:
@@ -472,11 +496,22 @@ class AIAgent:
         Returns:
             List of AIAnalysisResult in the same order as input texts.
         """
+        logger.debug(
+            "AIAgent.analyze_batch called: %d texts, batch_size=%d",
+            len(texts),
+            self.config.batch_size,
+        )
+
         if self.config.batch_size <= 1:
             # Legacy mode: one call per message
             results: list[AIAnalysisResult] = []
             total = len(texts)
             for i, text in enumerate(texts):
+                logger.debug(
+                    "Sending single message to LLM: text_len=%d, text_preview=%s",
+                    len(text),
+                    text[:100],
+                )
                 result = await self.analyze_text(text)
                 results.append(result)
                 if progress_callback:
@@ -489,6 +524,11 @@ class AIAgent:
 
         for chunk_start in range(0, total, self.config.batch_size):
             chunk = texts[chunk_start : chunk_start + self.config.batch_size]
+            logger.debug(
+                "Sending chunk to LLM: chunk_start=%d, chunk_size=%d",
+                chunk_start,
+                len(chunk),
+            )
             chunk_results = await self.analyze_texts_batch(
                 texts=chunk,
                 progress_callback=None,  # We handle progress at chunk level
@@ -496,5 +536,10 @@ class AIAgent:
             all_results.extend(chunk_results)
             if progress_callback:
                 progress_callback(min(chunk_start + len(chunk), total), total)
+
+        logger.debug(
+            "AIAgent.analyze_batch completed: %d results",
+            len(all_results),
+        )
 
         return all_results
