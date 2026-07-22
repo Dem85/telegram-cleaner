@@ -297,12 +297,18 @@ class DeleteChatOnlyForMeProcessor(MessageProcessor):
 
 
 class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
-    """Base processor for AI-powered analysis of messages."""
+    """Base processor for AI-powered analysis of messages.
+
+    Collects messages during iteration and analyzes them in batches
+    during finalize() to reduce LLM API costs.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._ai_agent: AIAgent | None = None
         self._violation_message_ids: list[int] = []
+        # Buffer for batch analysis: list of (message_id, analysis_text)
+        self._pending_messages: list[tuple[int, str]] = []
 
     def _init_ai_agent(self, config) -> None:
         """Initialize AI agent from config."""
@@ -313,6 +319,7 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
             openai_api_key=config.OPENAI_API_KEY,
             openai_model=config.OPENAI_MODEL,
             openai_base_url=config.OPENAI_BASE_URL,
+            batch_size=config.AI_BATCH_SIZE,
             ai_debug=config.AI_DEBUG,
         )
         self._ai_agent = AIAgent(config=ai_config)
@@ -348,6 +355,20 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
         """Check if message has media content."""
         return bool(msg.media)
 
+    async def _run_batch_analysis(self) -> None:
+        """Run batch analysis on all pending messages."""
+        if not self._pending_messages:
+            return
+
+        texts = [text for _, text in self._pending_messages]
+        results = await self._ai_agent.analyze_batch(texts)
+
+        for (msg_id, _), result in zip(self._pending_messages, results):
+            if result.is_violation:
+                self._violation_message_ids.append(msg_id)
+
+        self._pending_messages.clear()
+
 
 class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
     """Analyze only text messages for legal violations."""
@@ -361,16 +382,16 @@ class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
         if not text:
             return True  # skip empty messages
 
-        result = await self._ai_agent.analyze_text(text)
-        if result.is_violation:
-            self._violation_message_ids.append(msg.id)
-            self.cache[self.action.value][self.chat.id].append(msg)
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, text))
+        self.cache[self.action.value][self.chat.id].append(msg)
 
         return True
 
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
+        await self._run_batch_analysis()
         await super().finalize()
 
     def _get_config(self):
@@ -397,10 +418,9 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
             # If only media without text, we still note it
             analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
 
-        result = await self._ai_agent.analyze_text(analysis_text)
-        if result.is_violation:
-            self._violation_message_ids.append(msg.id)
-            self.cache[self.action.value][self.chat.id].append(msg)
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, analysis_text))
+        self.cache[self.action.value][self.chat.id].append(msg)
 
         return True
 
@@ -419,6 +439,7 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
+        await self._run_batch_analysis()
         await super().finalize()
 
     def _get_config(self):
@@ -432,6 +453,9 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
+
+        # Run batch analysis on all pending messages
+        await self._run_batch_analysis()
 
         # First, collect all messages
         await super().finalize()
@@ -465,10 +489,9 @@ class AIAnalyzeAndDeleteTextProcessor(BaseAIAnalyzeAndDeleteProcessor):
         if not text:
             return True
 
-        result = await self._ai_agent.analyze_text(text)
-        if result.is_violation:
-            self._violation_message_ids.append(msg.id)
-            self.cache[self.action.value][self.chat.id].append(msg)
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, text))
+        self.cache[self.action.value][self.chat.id].append(msg)
 
         return True
 
@@ -489,10 +512,9 @@ class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
         if self._has_media(msg) and not analysis_text:
             analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
 
-        result = await self._ai_agent.analyze_text(analysis_text)
-        if result.is_violation:
-            self._violation_message_ids.append(msg.id)
-            self.cache[self.action.value][self.chat.id].append(msg)
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, analysis_text))
+        self.cache[self.action.value][self.chat.id].append(msg)
 
         return True
 

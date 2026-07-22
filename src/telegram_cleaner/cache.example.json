@@ -10,6 +10,7 @@
   "OPENAI_MODEL": "gpt-4o-mini",
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "AI_DEBUG": false,
+  "AI_BATCH_SIZE": 100,
   "MTPROTO_ENABLED": false,
   "MTPROTO_TYPE": "socks5",
   "MTPROTO_HOST": "",

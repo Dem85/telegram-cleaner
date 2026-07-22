@@ -250,12 +250,40 @@ When you select chats, the following AI-powered actions appear in the menu:
 
 ### How it works
 
-1. Each message is sent to the LLM with a system prompt describing 8 articles of Russian law
-2. The LLM returns a JSON response: `{"is_violation": true/false, "confidence": 0.0-1.0, "articles": [...], "reason": "..."}`
-3. If a violation is detected, the message is flagged (and optionally deleted)
-4. The analysis is conservative — only clear violations are reported
+1. All messages are collected during the scan phase
+2. Messages are sent to the LLM in **batches** (default: 100 messages per request) — this drastically reduces API costs
+3. The LLM receives a JSON array of messages and returns a JSON array of results in one response
+4. If a violation is detected, the message is flagged (and optionally deleted)
+5. The analysis is conservative — only clear violations are reported
 
 > **Note:** The system prompt and full list of checked articles are in [`RUSSIAN_LAWS.md`](RUSSIAN_LAWS.md).
+
+### Batch processing (cost optimization)
+
+Instead of sending one API request per message (which would duplicate the system prompt each time),
+Telegram Cleaner **collects all messages and sends them in a single LLM call**.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `AI_BATCH_SIZE` | `100` | Number of messages per LLM request. Set to `1` to disable batching (legacy mode). |
+
+**How much does this save?**
+
+- Without batching: N API calls for N messages, each with a full system prompt
+- With batching (`batch_size=100`): 1 API call per 100 messages
+- For 1000 messages: **1000 calls → 10 calls** (100× reduction in API calls)
+- System prompt is sent once instead of 1000 times
+
+Configure in `cache.json`:
+
+```json
+{
+  "AI_BATCH_SIZE": 100
+}
+```
+
+> **Note:** For Ollama (local LLM), batching also speeds up analysis significantly since
+> the model processes multiple texts in a single inference pass.
 
 
 ## 🧩 Advanced usage
