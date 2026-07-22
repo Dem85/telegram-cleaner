@@ -108,12 +108,23 @@ class AIConfig:
 
 
 class AIAgent:
-    """AI agent that analyzes messages against Russian legislation."""
+    """AI agent that analyzes messages against Russian legislation.
+
+    Client is initialized lazily on first use to avoid ImportError
+    when the openai package is not installed and no AI actions are selected.
+    """
 
     def __init__(self, config: AIConfig) -> None:
         self.config = config
         self._client: Any = None
+        self._initialized = False
+
+    async def _ensure_initialized(self) -> None:
+        """Lazy initialization of the LLM client."""
+        if self._initialized:
+            return
         self._init_client()
+        self._initialized = True
 
     def _init_client(self) -> None:
         """Initialize the appropriate client based on provider."""
@@ -141,11 +152,15 @@ class AIAgent:
                 self.config.ollama_url,
                 self.config.ollama_model,
             )
-        except ImportError:
-            logger.error(
-                "openai package is not installed. Install it with: pip install openai"
+        except ImportError as e:
+            msg = (
+                "openai package is not installed. "
+                "Install it with: pip install openai\n"
+                "Or use the system venv:\n"
+                "  source .venv2/bin/activate && pip install openai"
             )
-            raise
+            logger.error(msg)
+            raise ImportError(msg) from e
 
     def _init_openai(self) -> None:
         """Initialize OpenAI client."""
@@ -163,11 +178,15 @@ class AIAgent:
                 self.config.openai_model,
                 self.config.openai_base_url,
             )
-        except ImportError:
-            logger.error(
-                "openai package is not installed. Install it with: pip install openai"
+        except ImportError as e:
+            msg = (
+                "openai package is not installed. "
+                "Install it with: pip install openai\n"
+                "Or use the system venv:\n"
+                "  source .venv2/bin/activate && pip install openai"
             )
-            raise
+            logger.error(msg)
+            raise ImportError(msg) from e
 
     async def analyze_text(self, text: str) -> AIAnalysisResult:
         """Analyze a single text message for legal violations.
@@ -180,6 +199,8 @@ class AIAgent:
         """
         if not text or not text.strip():
             return AIAnalysisResult(is_violation=False, confidence=0.0)
+
+        await self._ensure_initialized()
 
         try:
             response = await self._call_llm(text)

@@ -5,7 +5,6 @@ from functools import partial
 from rich.console import Console
 from telethon import TelegramClient
 
-from telegram_cleaner.ai_agent import AIAgent, AIConfig, AIProvider
 from telegram_cleaner.cleaner import Cleaner
 from telegram_cleaner.config import Config
 from telegram_cleaner.export import ExportBuffer
@@ -30,19 +29,8 @@ async def main() -> None:
     export_buffer = ExportBuffer()
     cache = defaultdict(partial(defaultdict, list))
 
-    # Initialize AI agent from config
-    ai_config = AIConfig(
-        provider=AIProvider(config.AI_PROVIDER),
-        ollama_url=config.OLLAMA_URL,
-        ollama_model=config.OLLAMA_MODEL,
-        openai_api_key=config.OPENAI_API_KEY,
-        openai_model=config.OPENAI_MODEL,
-        openai_base_url=config.OPENAI_BASE_URL,
-    )
-    ai_agent = AIAgent(config=ai_config)
-
     async with Cleaner(
-        config=config, terminal_ui=terminal_ui, client=client, ai_agent=ai_agent,
+        config=config, terminal_ui=terminal_ui, client=client,
     ) as cleaner:
         await cleaner.run(export_buffer=export_buffer, cache=cache)
 
