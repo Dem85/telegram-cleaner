@@ -304,7 +304,9 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
     """Base processor for AI-powered analysis of messages.
 
     Collects messages during iteration and analyzes them in batches
-    during finalize() to reduce LLM API costs.
+    to reduce LLM API costs. Supports incremental flushing:
+    when the pending buffer reaches batch_size, messages are sent to AI
+    immediately without waiting for the end of iteration.
     """
 
     def __init__(self, *args, **kwargs):
@@ -313,6 +315,8 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
         self._violation_message_ids: list[int] = []
         # Buffer for batch analysis: list of (message_id, analysis_text)
         self._pending_messages: list[tuple[int, str]] = []
+        # Total number of messages sent to AI (for logging)
+        self._total_analyzed: int = 0
 
     def _init_ai_agent(self, config) -> None:
         """Initialize AI agent from config."""
@@ -359,8 +363,8 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
         """Check if message has media content."""
         return bool(msg.media)
 
-    async def _run_batch_analysis(self) -> None:
-        """Run batch analysis on all pending messages."""
+    async def _flush_pending(self) -> None:
+        """Run batch analysis on all pending messages and clear the buffer."""
         if not self._pending_messages:
             logger.debug("No pending messages for batch analysis")
             return
@@ -390,13 +394,28 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
                     result.reason,
                 )
 
+        self._total_analyzed += len(self._pending_messages)
         logger.debug(
-            "Batch analysis completed: %d processed, %d violations found",
+            "Batch analysis completed: %d processed, %d violations found (total analyzed: %d)",
             len(self._pending_messages),
             violations_found,
+            self._total_analyzed,
         )
 
         self._pending_messages.clear()
+
+    async def _flush_pending_if_needed(self) -> None:
+        """Flush pending messages to AI if buffer has reached batch_size."""
+        if self._ai_agent is None:
+            self._init_ai_agent(self._get_config())
+        batch_size = self._ai_agent.config.batch_size
+        if len(self._pending_messages) >= batch_size:
+            logger.debug(
+                "Pending buffer full (%d >= %d), flushing incrementally",
+                len(self._pending_messages),
+                batch_size,
+            )
+            await self._flush_pending()
 
 
 class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
@@ -423,12 +442,16 @@ class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
             text[:100],
         )
 
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
+
         return True
 
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
-        await self._run_batch_analysis()
+        # Flush any remaining pending messages
+        await self._flush_pending()
         await super().finalize()
 
     def _get_config(self):
@@ -468,6 +491,9 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
             analysis_text[:100],
         )
 
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
+
         return True
 
     def _get_media_type(self, msg: Message) -> str:
@@ -485,7 +511,8 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
-        await self._run_batch_analysis()
+        # Flush any remaining pending messages
+        await self._flush_pending()
         await super().finalize()
 
     def _get_config(self):
@@ -500,14 +527,16 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
     During iteration:
     - All messages are stored in _all_messages for related-message lookup.
     - Only the user's own messages are added to _pending_messages for AI analysis.
+    - Pending messages are incrementally flushed to AI when buffer reaches batch_size.
+    - Violations found during incremental flush are deleted IMMEDIATELY.
 
     During finalize():
-    1. Run AI analysis on the user's pending messages.
-    2. For each violating message (user's own), collect related messages:
+    1. Flush any remaining pending messages to AI and delete violations immediately.
+    2. For ALL violations found during the entire iteration, collect related messages:
        - Messages that reply to the violating message (unconditional — always deleted)
        - Messages that are replied to by the violating message (unconditional)
        - All messages within AI_RELATED_MINUTES time window around the violation
-    3. Delete all collected messages (violating + related), regardless of author.
+    3. Delete all collected related messages (the violations themselves are already deleted).
     """
 
     def __init__(self, *args, **kwargs):
@@ -516,6 +545,8 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         self._all_messages: dict[int, Message] = {}
         # Related message ids to delete (in addition to violations)
         self._related_message_ids: set[int] = set()
+        # Track which violations have already been deleted (incremental flushes)
+        self._already_deleted_violations: set[int] = set()
 
     @property
     def async_messages_iterator(self) -> any:
@@ -534,17 +565,83 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         self._all_messages[msg.id] = msg
         return True
 
+    async def _flush_pending(self) -> None:
+        """Run batch analysis and immediately delete any violations found."""
+        if not self._pending_messages:
+            logger.debug("No pending messages for batch analysis")
+            return
+
+        msg_ids = [mid for mid, _ in self._pending_messages]
+        logger.debug(
+            "Starting batch analysis: %d messages, ids=%s",
+            len(self._pending_messages),
+            msg_ids[:10],
+        )
+        if len(msg_ids) > 10:
+            logger.debug("... and %d more messages", len(msg_ids) - 10)
+
+        texts = [text for _, text in self._pending_messages]
+        results = await self._ai_agent.analyze_batch(texts)
+
+        new_violations: list[int] = []
+        for (msg_id, _), result in zip(self._pending_messages, results):
+            if result.is_violation:
+                self._violation_message_ids.append(msg_id)
+                new_violations.append(msg_id)
+                logger.debug(
+                    "VIOLATION DETECTED: msg_id=%s, articles=%s, confidence=%.2f, reason=%s",
+                    msg_id,
+                    result.articles,
+                    result.confidence,
+                    result.reason,
+                )
+
+        self._total_analyzed += len(self._pending_messages)
+        logger.debug(
+            "Batch analysis completed: %d processed, %d violations found (total analyzed: %d)",
+            len(self._pending_messages),
+            len(new_violations),
+            self._total_analyzed,
+        )
+
+        self._pending_messages.clear()
+
+        # Immediately delete newly found violations
+        if new_violations:
+            logger.debug(
+                "Immediately deleting %d newly found violations: ids=%s",
+                len(new_violations),
+                new_violations,
+            )
+            await self._delete_message_ids(new_violations)
+            self._already_deleted_violations.update(new_violations)
+
+    async def _delete_message_ids(self, ids: list[int]) -> None:
+        """Delete a list of message ids in chunks."""
+        if not ids:
+            return
+        chunk_size = 100
+        for i in range(0, len(ids), chunk_size):
+            chunk = ids[i : i + chunk_size]
+            logger.debug("Deleting chunk: ids=%s", chunk)
+            await retry_on_flood_wait(
+                self.client.delete_messages,
+                entity=self.chat,
+                message_ids=chunk,
+                revoke=True,
+            )
+
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
 
-        # Run batch analysis on all pending messages (user's own messages only)
-        await self._run_batch_analysis()
+        # Flush any remaining pending messages (violations deleted immediately inside _flush_pending)
+        await self._flush_pending()
 
         logger.debug(
-            "AI analysis complete: %d violations found out of %d pending messages",
+            "AI analysis complete: %d violations found out of %d total analyzed",
             len(self._violation_message_ids),
-            len(self._pending_messages) + len(self._violation_message_ids),
+            self._total_analyzed,
         )
 
         # Collect related messages for each violation
@@ -592,33 +689,24 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
                     self._related_message_ids.add(msg_id)
                     continue
 
-        # Combine violation and related message ids
-        all_to_delete = set(self._violation_message_ids) | self._related_message_ids
-
         logger.debug(
-            "Collected %d related messages for %d violations, total to delete: %d",
+            "Collected %d related messages for %d violations",
             len(self._related_message_ids),
             len(self._violation_message_ids),
-            len(all_to_delete),
         )
 
-        # Delete all collected messages (revoke=True = delete for everyone)
-        if all_to_delete:
-            chunk_size = 100
-            ids_list = sorted(all_to_delete)
-            logger.debug("Deleting %d messages in chunks of %d", len(ids_list), chunk_size)
-            for i in range(0, len(ids_list), chunk_size):
-                chunk = ids_list[i : i + chunk_size]
-                logger.debug("Deleting chunk: ids=%s", chunk)
-                await retry_on_flood_wait(
-                    self.client.delete_messages,
-                    entity=self.chat,
-                    message_ids=chunk,
-                    revoke=True,
-                )
-            logger.debug("Successfully deleted all %d messages", len(ids_list))
+        # Delete related messages (violations themselves are already deleted)
+        if self._related_message_ids:
+            ids_list = sorted(self._related_message_ids)
+            logger.debug(
+                "Deleting %d related messages in chunks of %d",
+                len(ids_list),
+                100,
+            )
+            await self._delete_message_ids(ids_list)
+            logger.debug("Successfully deleted all %d related messages", len(ids_list))
         else:
-            logger.debug("No messages to delete")
+            logger.debug("No related messages to delete")
 
     def _get_related_minutes(self) -> int:
         """Get the time window in minutes for related messages."""
@@ -669,6 +757,9 @@ class AIAnalyzeAndDeleteTextProcessor(BaseAIAnalyzeAndDeleteProcessor):
             text[:100],
         )
 
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
+
         return True
 
 
@@ -714,6 +805,9 @@ class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
             len(analysis_text),
             analysis_text[:100],
         )
+
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
 
         return True
 
@@ -778,6 +872,9 @@ class AIAnalyzeAndDeleteWithRelatedTextProcessor(BaseAIAnalyzeAndDeleteWithRelat
             text[:100],
         )
 
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
+
         return True
 
 
@@ -821,6 +918,9 @@ class AIAnalyzeAndDeleteWithRelatedAllProcessor(BaseAIAnalyzeAndDeleteWithRelate
             len(analysis_text),
             analysis_text[:100],
         )
+
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
 
         return True
 
