@@ -14,8 +14,9 @@ from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import Channel, Chat, Message, ReactionEmpty, User
 
 from telegram_cleaner.actions import Action
-from telegram_cleaner.ai_agent import AIAgent, AIConfig, AIProvider
+from telegram_cleaner.ai_agent import AIAgent, AIConfig, AIProvider, AIAnalysisResult
 from telegram_cleaner.error_handlers import retry_on_flood_wait
+from telegram_cleaner.report import write_deletion_report
 from telegram_cleaner import constants
 
 if TYPE_CHECKING:
@@ -328,6 +329,7 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
             openai_model=config.OPENAI_MODEL,
             openai_base_url=config.OPENAI_BASE_URL,
             batch_size=config.AI_BATCH_SIZE,
+            timeout=config.AI_TIMEOUT,
             ai_debug=config.AI_DEBUG,
         )
         self._ai_agent = AIAgent(config=ai_config)
@@ -547,6 +549,9 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         self._related_message_ids: set[int] = set()
         # Track which violations have already been deleted (incremental flushes)
         self._already_deleted_violations: set[int] = set()
+        # Store AI analysis details for each violation (for the deletion report)
+        # Maps msg_id -> AIAnalysisResult
+        self._violation_details: dict[int, AIAnalysisResult] = {}
 
     @property
     def async_messages_iterator(self) -> any:
@@ -588,6 +593,8 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
             if result.is_violation:
                 self._violation_message_ids.append(msg_id)
                 new_violations.append(msg_id)
+                # Store violation details for the deletion report
+                self._violation_details[msg_id] = result
                 logger.debug(
                     "VIOLATION DETECTED: msg_id=%s, articles=%s, confidence=%.2f, reason=%s",
                     msg_id,
@@ -616,6 +623,9 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
             await self._delete_message_ids(new_violations)
             self._already_deleted_violations.update(new_violations)
 
+            # Write deletion report for this batch
+            await self._write_report_for_violations(new_violations)
+
     async def _delete_message_ids(self, ids: list[int]) -> None:
         """Delete a list of message ids in chunks."""
         if not ids:
@@ -630,6 +640,48 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
                 message_ids=chunk,
                 revoke=True,
             )
+
+    async def _write_report_for_violations(self, violation_ids: list[int]) -> None:
+        """Write a deletion report entry for the given violation message ids.
+
+        Collects the actual Message objects and their AI analysis details,
+        then appends a report entry to the report file.
+        """
+        if not violation_ids:
+            return
+
+        # Collect messages and their analysis details
+        messages: list[Message] = []
+        all_articles: set[str] = set()
+        all_reasons: list[str] = []
+
+        for vid in violation_ids:
+            msg = self._all_messages.get(vid)
+            if msg is None:
+                continue
+            messages.append(msg)
+            details = self._violation_details.get(vid)
+            if details:
+                all_articles.update(details.articles)
+                if details.reason:
+                    all_reasons.append(details.reason)
+
+        if not messages:
+            return
+
+        # Combine reasons (take the most common one or the first)
+        reason = all_reasons[0] if all_reasons else "Нарушение законодательства РФ"
+        articles = sorted(all_articles) if all_articles else ["не указаны"]
+
+        chat_title = getattr(self.chat, "title", None) or getattr(self.chat, "username", None) or str(self.chat.id)
+
+        write_deletion_report(
+            messages=messages,
+            articles=articles,
+            reason=reason,
+            chat_title=chat_title,
+            chat_id=self.chat.id,
+        )
 
     async def finalize(self) -> None:
         if self._ai_agent is None:

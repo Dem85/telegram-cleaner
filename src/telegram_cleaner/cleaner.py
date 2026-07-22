@@ -77,6 +77,7 @@ class Cleaner:
                 openai_model=self.config.OPENAI_MODEL,
                 openai_base_url=self.config.OPENAI_BASE_URL,
                 batch_size=self.config.AI_BATCH_SIZE,
+                timeout=self.config.AI_TIMEOUT,
                 ai_debug=self.config.AI_DEBUG,
             )
             self._ai_agent = AIAgent(config=ai_config)

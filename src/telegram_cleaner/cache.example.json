@@ -11,6 +11,7 @@
   "OPENAI_BASE_URL": "https://api.openai.com/v1",
   "AI_DEBUG": false,
   "AI_BATCH_SIZE": 100,
+  "AI_TIMEOUT": 120,
   "AI_RELATED_MINUTES": 60,
   "MTPROTO_ENABLED": false,
   "MTPROTO_TYPE": "socks5",

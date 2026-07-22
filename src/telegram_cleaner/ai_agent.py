@@ -149,7 +149,7 @@ class AIConfig:
     openai_model: str = "gpt-4o-mini"
     openai_base_url: str = "https://api.openai.com/v1"
     # Common
-    timeout: int = 60
+    timeout: int = 120
     max_retries: int = 3
     # Batch processing
     batch_size: int = 100

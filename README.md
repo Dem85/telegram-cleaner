@@ -8,7 +8,7 @@ With just a few key-strokes you can:
 * **leave groups / super-groups**;
 * **delete private dialogues** for yourself or for both participants;
 * **AI-powered analysis** of messages for potential violations of Russian legislation;
-* **AI-powered deletion** of violating messages (for everyone).
+* **AI-powered deletion** of violating messages (for everyone) with automatic **deletion reports**.
 
 Everything happens in an interactive, colourful TUI that shows live progress bars – so you always
 see what is going on.
@@ -23,7 +23,7 @@ see what is going on.
 | Bulk deletion            | • Your messages<br>• Your reactions                                                                          |
 | Chat actions             | • Leave group / super-group  <br>• Delete private chat (*for me* / *for both*)                               |
 | AI analysis              | • Analyze text messages for RU law violations via LLM<br>• Analyze text + media (photo, video, audio)        |
-| AI deletion              | • Analyze & delete violating messages (for everyone)                                                         |
+| AI deletion              | • Analyze & delete violating messages (for everyone)<br>• Automatic **deletion reports** in `report/` folder |
 | Multi-chat processing    | All chosen chats are processed **in parallel** for maximum speed                                             |
 | Safety first             | Provides exports (for debug purposes also) & asks for confirmation before doing anything destructive         |
 | Language support         | English & Russian (more can be added easily)                                                                 |
@@ -258,32 +258,63 @@ When you select chats, the following AI-powered actions appear in the menu:
 
 > **Note:** The system prompt and full list of checked articles are in [`RUSSIAN_LAWS.md`](RUSSIAN_LAWS.md).
 
-### Batch processing (cost optimization)
+### Configuration reference
 
-Instead of sending one API request per message (which would duplicate the system prompt each time),
-Telegram Cleaner **collects all messages and sends them in a single LLM call**.
+All AI-related settings are configured in `cache.json`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `AI_BATCH_SIZE` | `100` | Number of messages per LLM request. Set to `1` to disable batching (legacy mode). |
+| `AI_TIMEOUT` | `120` | Timeout in seconds for LLM API calls (both Ollama and OpenAI). |
+| `AI_RELATED_MINUTES` | `60` | Time window in minutes for collecting related messages when using "delete with related" actions. |
+| `AI_DEBUG` | `false` | Enable debug logging of AI requests/responses. |
 
-**How much does this save?**
+**How much does batching save?**
 
 - Without batching: N API calls for N messages, each with a full system prompt
 - With batching (`batch_size=100`): 1 API call per 100 messages
 - For 1000 messages: **1000 calls → 10 calls** (100× reduction in API calls)
 - System prompt is sent once instead of 1000 times
 
-Configure in `cache.json`:
-
-```json
-{
-  "AI_BATCH_SIZE": 100
-}
-```
-
 > **Note:** For Ollama (local LLM), batching also speeds up analysis significantly since
 > the model processes multiple texts in a single inference pass.
+
+### Deletion reports
+
+When AI-powered deletion actions remove messages, a detailed report is automatically
+appended to a file in the `report/` directory. Each **process session** creates its own
+file named `ai_deletion_report_YYYYMMDD_HHMMSS.txt` (timestamp = moment the first
+deletion occurs). All deletion batches within the same session are appended to the same file.
+
+Each entry includes:
+
+- **Timestamp** of deletion
+- **Chat** name and ID
+- **Violation reason** and **articles** detected by the LLM
+- **Number of deleted messages**
+- **List of deleted messages** with timestamps, IDs, and text previews
+
+The report file is created automatically and grows incrementally — each deletion batch
+appends a new entry. This gives you a full audit trail of all AI-triggered deletions.
+
+Example report entry:
+
+```
+========================================================================
+Время удаления: 2026-07-22 14:30:00 UTC+05:00
+Чат: Some Chat (id=123456789)
+Причина: Негативные высказывания об армии РФ
+Статьи: Ст. 280.3 УК РФ
+Количество сообщений: 3
+------------------------------------------------------------------------
+  [2026-07-22 14:25:00] id=101 | это сообщение содержит нарушение...
+  [2026-07-22 14:26:00] id=102 | ещё одно сообщение с нарушением...
+  [2026-07-22 14:27:00] id=103 | и ещё одно...
+========================================================================
+```
+
+> **Note:** Add `report/` to your `.gitignore` or `.codeassistantignore` if you don't
+> want the report files tracked in version control.
 
 
 ## 🧩 Advanced usage

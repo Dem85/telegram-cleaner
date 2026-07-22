@@ -22,6 +22,7 @@ class Config:
     OPENAI_BASE_URL: str = field(default="https://api.openai.com/v1")
     AI_DEBUG: bool = field(default=False)
     AI_BATCH_SIZE: int = field(default=100)
+    AI_TIMEOUT: int = field(default=120)
     # Related messages deletion settings
     AI_RELATED_MINUTES: int = field(default=60)
     # Proxy settings
