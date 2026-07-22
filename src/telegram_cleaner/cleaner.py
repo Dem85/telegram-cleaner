@@ -74,6 +74,7 @@ class Cleaner:
                 openai_api_key=self.config.OPENAI_API_KEY,
                 openai_model=self.config.OPENAI_MODEL,
                 openai_base_url=self.config.OPENAI_BASE_URL,
+                ai_debug=self.config.AI_DEBUG,
             )
             self._ai_agent = AIAgent(config=ai_config)
         return self._ai_agent

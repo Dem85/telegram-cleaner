@@ -20,6 +20,7 @@ class Config:
     OPENAI_API_KEY: str = field(default="")
     OPENAI_MODEL: str = field(default="gpt-4o-mini")
     OPENAI_BASE_URL: str = field(default="https://api.openai.com/v1")
+    AI_DEBUG: bool = field(default=False)
     # Proxy settings
     MTPROTO_ENABLED: bool = field(default=False)
     MTPROTO_TYPE: str = field(default="socks5")

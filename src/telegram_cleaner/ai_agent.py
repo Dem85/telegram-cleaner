@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from rich.console import Console
+
 logger = logging.getLogger(__name__)
+console = Console()
 
 SYSTEM_PROMPT = """Ты — юридический анализатор текста. Твоя задача — проверить, содержит ли переданное сообщение признаки нарушения российского законодательства.
 
@@ -105,6 +108,8 @@ class AIConfig:
     # Common
     timeout: int = 60
     max_retries: int = 3
+    # Debug
+    ai_debug: bool = False
 
 
 class AIAgent:
@@ -202,8 +207,21 @@ class AIAgent:
 
         await self._ensure_initialized()
 
+        if self.config.ai_debug:
+            logger.info("=== AI DEBUG: Request ===\n%s", text)
+            console.print("[bold yellow]━━━ AI DEBUG: Request ━━━[/bold yellow]")
+            console.print(text)
+            console.print("[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
+
         try:
             response = await self._call_llm(text)
+
+            if self.config.ai_debug:
+                logger.info("=== AI DEBUG: Response ===\n%s", response)
+                console.print("[bold cyan]━━━ AI DEBUG: Response ━━━[/bold cyan]")
+                console.print(response)
+                console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+
             return self._parse_response(response)
         except Exception as e:
             logger.warning("AI analysis failed for message: %s", e)

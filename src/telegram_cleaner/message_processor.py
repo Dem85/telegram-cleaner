@@ -313,6 +313,7 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
             openai_api_key=config.OPENAI_API_KEY,
             openai_model=config.OPENAI_MODEL,
             openai_base_url=config.OPENAI_BASE_URL,
+            ai_debug=config.AI_DEBUG,
         )
         self._ai_agent = AIAgent(config=ai_config)
 
