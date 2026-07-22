@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from itertools import chain
 from typing import TYPE_CHECKING
@@ -448,23 +449,107 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
 
 
 class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
-    """Base processor for AI analysis + deletion of violating messages."""
+    """Base processor for AI analysis + deletion of violating messages.
+
+    Iterates ALL messages in the chat (not just the user's own messages).
+    During iteration:
+    - All messages are stored in _all_messages for related-message lookup.
+    - Only the user's own messages are added to _pending_messages for AI analysis.
+
+    During finalize():
+    1. Run AI analysis on the user's pending messages.
+    2. For each violating message (user's own), collect related messages:
+       - Messages that reply to the violating message (unconditional — always deleted)
+       - Messages that are replied to by the violating message (unconditional)
+       - All messages within AI_RELATED_MINUTES time window around the violation
+    3. Delete all collected messages (violating + related), regardless of author.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Store all messages by id for related message lookup
+        self._all_messages: dict[int, Message] = {}
+        # Related message ids to delete (in addition to violations)
+        self._related_message_ids: set[int] = set()
+
+    @property
+    def async_messages_iterator(self) -> any:
+        """Iterate ALL messages in the chat (not just user's own).
+        
+        We need all messages to find related messages (replies, time window)
+        that may belong to other users.
+        """
+        return self.client.iter_messages(
+            entity=self.chat.id,
+            wait_time=self.wait_time,
+        )
+
+    async def process(self, msg: Message) -> bool:
+        # Store ALL messages for later related-message lookup
+        self._all_messages[msg.id] = msg
+        return True
 
     async def finalize(self) -> None:
         if self._ai_agent is None:
             self._init_ai_agent(self._get_config())
 
-        # Run batch analysis on all pending messages
+        # Run batch analysis on all pending messages (user's own messages only)
         await self._run_batch_analysis()
 
-        # First, collect all messages
-        await super().finalize()
+        # Collect related messages for each violation
+        related_minutes = self._get_related_minutes()
+        for violation_id in self._violation_message_ids:
+            violation_msg = self._all_messages.get(violation_id)
+            if violation_msg is None:
+                continue
 
-        # Delete violating messages (revoke=True = delete for everyone)
-        if self._violation_message_ids:
+            violation_date = violation_msg.date
+            if violation_date is None:
+                continue
+
+            # Ensure violation_date is timezone-aware
+            if violation_date.tzinfo is None:
+                violation_date = violation_date.replace(tzinfo=timezone.utc)
+
+            time_window = timedelta(minutes=related_minutes)
+
+            for msg_id, msg in self._all_messages.items():
+                if msg_id in self._related_message_ids or msg_id in self._violation_message_ids:
+                    continue
+
+                msg_date = msg.date
+                if msg_date is None:
+                    continue
+
+                # Ensure msg_date is timezone-aware
+                if msg_date.tzinfo is None:
+                    msg_date = msg_date.replace(tzinfo=timezone.utc)
+
+                # 1. Messages that reply to the violating message (unconditional)
+                if msg.reply_to and msg.reply_to.reply_to_msg_id == violation_id:
+                    self._related_message_ids.add(msg_id)
+                    continue
+
+                # 2. Messages that are replied to by the violating message (unconditional)
+                if violation_msg.reply_to and violation_msg.reply_to.reply_to_msg_id == msg_id:
+                    self._related_message_ids.add(msg_id)
+                    continue
+
+                # 3. All messages within the time window around the violation
+                time_diff = abs(msg_date - violation_date)
+                if time_diff <= time_window:
+                    self._related_message_ids.add(msg_id)
+                    continue
+
+        # Combine violation and related message ids
+        all_to_delete = set(self._violation_message_ids) | self._related_message_ids
+
+        # Delete all collected messages (revoke=True = delete for everyone)
+        if all_to_delete:
             chunk_size = 100
-            for i in range(0, len(self._violation_message_ids), chunk_size):
-                chunk = self._violation_message_ids[i : i + chunk_size]
+            ids_list = sorted(all_to_delete)
+            for i in range(0, len(ids_list), chunk_size):
+                chunk = ids_list[i : i + chunk_size]
                 await retry_on_flood_wait(
                     self.client.delete_messages,
                     entity=self.chat,
@@ -472,21 +557,40 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
                     revoke=True,
                 )
 
+    def _get_related_minutes(self) -> int:
+        """Get the time window in minutes for related messages."""
+        from telegram_cleaner.config import Config
+        config = Config.load()
+        return config.AI_RELATED_MINUTES
+
     def _get_config(self):
         from telegram_cleaner.config import Config
         return Config.load()
 
 
 class AIAnalyzeAndDeleteTextProcessor(BaseAIAnalyzeAndDeleteProcessor):
-    """Analyze text messages and delete violating ones (for everyone)."""
+    """Analyze text messages and delete violating ones (for everyone)
+    along with related messages (replies, and messages within the time window).
+
+    Iterates ALL messages in the chat. Only the user's own text messages
+    are analyzed by AI. Related messages (replies, time window) of ANY author
+    are deleted along with violations.
+    """
 
     @property
     def include_media(self) -> bool:
         return False
 
     async def process(self, msg: Message) -> bool:
+        # Always store in _all_messages via super() first
+        await super().process(msg)
+
         text = self._get_message_text(msg)
         if not text:
+            return True
+
+        # Only analyze user's own messages
+        if msg.sender_id != self.me.id:
             return True
 
         # Buffer the message for batch analysis
@@ -497,15 +601,116 @@ class AIAnalyzeAndDeleteTextProcessor(BaseAIAnalyzeAndDeleteProcessor):
 
 
 class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
-    """Analyze text and media messages and delete violating ones (for everyone)."""
+    """Analyze text and media messages and delete violating ones (for everyone)
+    along with related messages (replies, and messages within the time window).
+
+    Iterates ALL messages in the chat. Only the user's own messages
+    are analyzed by AI. Related messages (replies, time window) of ANY author
+    are deleted along with violations.
+    """
 
     @property
     def include_media(self) -> bool:
         return True
 
     async def process(self, msg: Message) -> bool:
+        # Always store in _all_messages via super() first
+        await super().process(msg)
+
         text = self._get_message_text(msg)
         if not text and not self._has_media(msg):
+            return True
+
+        # Only analyze user's own messages
+        if msg.sender_id != self.me.id:
+            return True
+
+        analysis_text = text
+        if self._has_media(msg) and not analysis_text:
+            analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
+
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, analysis_text))
+        self.cache[self.action.value][self.chat.id].append(msg)
+
+        return True
+
+    def _get_media_type(self, msg: Message) -> str:
+        if msg.photo:
+            return "фото"
+        if msg.video or msg.video_note:
+            return "видео/кружок"
+        if msg.voice or msg.audio:
+            return "аудио"
+        if msg.document:
+            return "документ"
+        return "медиа"
+
+
+class BaseAIAnalyzeAndDeleteWithRelatedProcessor(BaseAIAnalyzeAndDeleteProcessor, ABC):
+    """Base processor for AI analysis + deletion of violating messages
+    along with related messages.
+
+    NOTE: This class is kept for backward compatibility.
+    The related-messages logic has been merged into BaseAIAnalyzeAndDeleteProcessor,
+    so all delete processors now collect related messages by default.
+    This class behaves identically to BaseAIAnalyzeAndDeleteProcessor.
+    """
+
+    pass
+
+
+class AIAnalyzeAndDeleteWithRelatedTextProcessor(BaseAIAnalyzeAndDeleteWithRelatedProcessor):
+    """Analyze text messages, delete violating ones along with related messages.
+
+    NOTE: This class is kept for backward compatibility.
+    The related-messages logic is now built into all delete processors.
+    """
+
+    @property
+    def include_media(self) -> bool:
+        return False
+
+    async def process(self, msg: Message) -> bool:
+        # Always store in _all_messages via super() first
+        await super().process(msg)
+
+        text = self._get_message_text(msg)
+        if not text:
+            return True
+
+        # Only analyze user's own messages
+        if msg.sender_id != self.me.id:
+            return True
+
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, text))
+        self.cache[self.action.value][self.chat.id].append(msg)
+
+        return True
+
+
+class AIAnalyzeAndDeleteWithRelatedAllProcessor(BaseAIAnalyzeAndDeleteWithRelatedProcessor):
+    """Analyze text and media messages, delete violating ones along with related messages.
+
+    NOTE: This class is kept for backward compatibility.
+    The related-messages logic is now built into all delete processors.
+    """
+
+    @property
+    def include_media(self) -> bool:
+        return True
+
+    async def process(self, msg: Message) -> bool:
+        # Always store in _all_messages via super() first
+        await super().process(msg)
+
+        text = self._get_message_text(msg)
+        if not text and not self._has_media(msg):
+            return True
+
+        # Only analyze user's own messages
+        if msg.sender_id != self.me.id:
             return True
 
         analysis_text = text

@@ -24,6 +24,9 @@ class Action(str, Enum):
     AI_ANALYZE_ALL = "action_ai_analyze_all"
     AI_ANALYZE_AND_DELETE_TEXT = "action_ai_analyze_and_delete_text"
     AI_ANALYZE_AND_DELETE_ALL = "action_ai_analyze_and_delete_all"
+    # AI-powered actions with related messages deletion
+    AI_ANALYZE_AND_DELETE_WITH_RELATED_TEXT = "action_ai_analyze_and_delete_with_related_text"
+    AI_ANALYZE_AND_DELETE_WITH_RELATED_ALL = "action_ai_analyze_and_delete_with_related_all"
 
 
 def get_available_actions(chats: list["ChatEntity"]) -> list[Action]:
@@ -46,5 +49,7 @@ def get_available_actions(chats: list["ChatEntity"]) -> list[Action]:
         Action.AI_ANALYZE_ALL,
         Action.AI_ANALYZE_AND_DELETE_TEXT,
         Action.AI_ANALYZE_AND_DELETE_ALL,
+        Action.AI_ANALYZE_AND_DELETE_WITH_RELATED_TEXT,
+        Action.AI_ANALYZE_AND_DELETE_WITH_RELATED_ALL,
     ])
     return actions
