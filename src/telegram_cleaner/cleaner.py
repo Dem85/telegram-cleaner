@@ -5,6 +5,7 @@ from telethon.tl.types import Channel, Chat, User
 
 from telegram_cleaner import constants
 from telegram_cleaner.actions import get_available_actions
+from telegram_cleaner.ai_agent import AIAgent
 from telegram_cleaner.config import Config
 from telegram_cleaner.constants import ChatEntity
 from telegram_cleaner.error_handlers import retry_on_flood_wait
@@ -15,11 +16,13 @@ from telegram_cleaner.ui import TerminalUI
 
 class Cleaner:
     def __init__(
-        self, config: Config, terminal_ui: TerminalUI, client: TelegramClient
+        self, config: Config, terminal_ui: TerminalUI, client: TelegramClient,
+        ai_agent: AIAgent | None = None,
     ) -> None:
         self.config = config
         self.terminal_ui = terminal_ui
         self.client = client
+        self.ai_agent = ai_agent
 
     async def run(self, export_buffer: ExportBuffer, cache: dict) -> None:
         self.terminal_ui.show_title()
@@ -72,6 +75,9 @@ class Cleaner:
                     me=me,
                     simultaneous_processors=simultaneous_processors,
                 )
+                # Inject AI agent into AI processors
+                if hasattr(processor, '_ai_agent') and self.ai_agent:
+                    processor._ai_agent = self.ai_agent
                 await self.terminal_ui.scan(processor=processor, progress=progress)
 
     async def _process_chats(

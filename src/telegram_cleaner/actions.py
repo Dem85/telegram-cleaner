@@ -19,6 +19,11 @@ class Action(str, Enum):
     LEAVE_GROUP = "action_leave_group"
     DELETE_PRIVATE_BOTH = "action_delete_private_both"
     DELETE_PRIVATE_SELF = "action_delete_private_self"
+    # AI-powered actions
+    AI_ANALYZE_TEXT = "action_ai_analyze_text"
+    AI_ANALYZE_ALL = "action_ai_analyze_all"
+    AI_ANALYZE_AND_DELETE_TEXT = "action_ai_analyze_and_delete_text"
+    AI_ANALYZE_AND_DELETE_ALL = "action_ai_analyze_and_delete_all"
 
 
 def get_available_actions(chats: list["ChatEntity"]) -> list[Action]:
@@ -35,4 +40,11 @@ def get_available_actions(chats: list["ChatEntity"]) -> list[Action]:
         actions.append(Action.LEAVE_GROUP)
     if have_private:
         actions.extend([Action.DELETE_PRIVATE_BOTH, Action.DELETE_PRIVATE_SELF])
+    # AI-powered actions are always available
+    actions.extend([
+        Action.AI_ANALYZE_TEXT,
+        Action.AI_ANALYZE_ALL,
+        Action.AI_ANALYZE_AND_DELETE_TEXT,
+        Action.AI_ANALYZE_AND_DELETE_ALL,
+    ])
     return actions

@@ -6,6 +6,10 @@ from telethon.tl.types import Channel, Chat, User
 
 from telegram_cleaner.actions import Action
 from telegram_cleaner.message_processor import (
+    AIAnalyzeAllProcessor,
+    AIAnalyzeAndDeleteAllProcessor,
+    AIAnalyzeAndDeleteTextProcessor,
+    AIAnalyzeTextProcessor,
     DeleteChatForBothProcessor,
     DeleteChatOnlyForMeProcessor,
     ExportMessagesProcessor,
@@ -85,6 +89,15 @@ TRANSLATIONS = {
         "action_leave_group": "Leave GROUP/SUPERGROUP",
         "action_delete_private_self": "Delete PRIVATE chat (for me only)",
         "action_delete_private_both": "Delete PRIVATE chat (for both)",
+        "action_ai_analyze_text": "AI: Analyze text for RU law violations",
+        "action_ai_analyze_all": "AI: Analyze text, photos, videos, audio for RU law violations",
+        "action_ai_analyze_and_delete_text": "AI: Analyze text & DELETE (for everyone) if violation found",
+        "action_ai_analyze_and_delete_all": "AI: Analyze all media & DELETE (for everyone) if violation found",
+        # AI progress
+        "ai_analyzing": "AI analyzing",
+        "ai_violations_found": "Violations found: {count}",
+        "ai_no_violations": "No violations found",
+        "ai_deleting": "Deleting violating messages",
         # Config
         "language_prompt": "Language / Язык",
         "api_id_prompt": "Telegram API ID",
@@ -135,6 +148,15 @@ TRANSLATIONS = {
         "action_leave_group": "Выйти из GROUP/SUPERGROUP",
         "action_delete_private_self": "Удалить PRIVATE только для себя",
         "action_delete_private_both": "Удалить PRIVATE для обоих",
+        "action_ai_analyze_text": "ИИ: Анализ текста на нарушения ЗК РФ",
+        "action_ai_analyze_all": "ИИ: Анализ текста, фото, видео, аудио на нарушения ЗК РФ",
+        "action_ai_analyze_and_delete_text": "ИИ: Анализ текста и УДАЛЕНИЕ (у всех) при нарушении",
+        "action_ai_analyze_and_delete_all": "ИИ: Анализ всех медиа и УДАЛЕНИЕ (у всех) при нарушении",
+        # AI progress
+        "ai_analyzing": "ИИ анализирует",
+        "ai_violations_found": "Нарушений найдено: {count}",
+        "ai_no_violations": "Нарушений не найдено",
+        "ai_deleting": "Удаляем сообщения с нарушениями",
         # Config
         "language_prompt": "Language / Язык",
         "api_id_prompt": "Telegram API ID",
@@ -150,4 +172,8 @@ ACTION_PROCESSOR_MAPPING = {
     Action.LEAVE_GROUP: LeaveGroupProcessor,
     Action.DELETE_PRIVATE_BOTH: DeleteChatForBothProcessor,
     Action.DELETE_PRIVATE_SELF: DeleteChatOnlyForMeProcessor,
+    Action.AI_ANALYZE_TEXT: AIAnalyzeTextProcessor,
+    Action.AI_ANALYZE_ALL: AIAnalyzeAllProcessor,
+    Action.AI_ANALYZE_AND_DELETE_TEXT: AIAnalyzeAndDeleteTextProcessor,
+    Action.AI_ANALYZE_AND_DELETE_ALL: AIAnalyzeAndDeleteAllProcessor,
 }

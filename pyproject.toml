@@ -18,6 +18,7 @@ dependencies = [
     "inquirer==3.4.0",
     "markdown-it-py==3.0.0",
     "mdurl==0.1.2",
+    "openai>=1.68.0",
     "pyaes==1.6.1",
     "pygments==2.19.1",
     "pysocks==1.7.1",

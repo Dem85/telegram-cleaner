@@ -1,12 +1,14 @@
 # 🧹 Telegram Cleaner
 
-Telegram Cleaner is a small CLI utility that helps you **keep your Telegram account tidy**.  
+Telegram Cleaner is a small CLI utility that helps you **keep your Telegram account tidy**.
 With just a few key-strokes you can:
 
 * export or wipe **all your own messages** from any chat (private, group or super-group);
 * export or remove **all your reactions** that were added after reactions were introduced (30 Dec 2021);
 * **leave groups / super-groups**;
-* **delete private dialogues** for yourself or for both participants.
+* **delete private dialogues** for yourself or for both participants;
+* **AI-powered analysis** of messages for potential violations of Russian legislation;
+* **AI-powered deletion** of violating messages (for everyone).
 
 Everything happens in an interactive, colourful TUI that shows live progress bars – so you always
 see what is going on.
@@ -20,6 +22,8 @@ see what is going on.
 | Export                   | • Your messages to `exports/export_messages_*.txt`  <br>• Your reactions to `exports/export_reactions_*.txt` |
 | Bulk deletion            | • Your messages<br>• Your reactions                                                                          |
 | Chat actions             | • Leave group / super-group  <br>• Delete private chat (*for me* / *for both*)                               |
+| AI analysis              | • Analyze text messages for RU law violations via LLM<br>• Analyze text + media (photo, video, audio)        |
+| AI deletion              | • Analyze & delete violating messages (for everyone)                                                         |
 | Multi-chat processing    | All chosen chats are processed **in parallel** for maximum speed                                             |
 | Safety first             | Provides exports (for debug purposes also) & asks for confirmation before doing anything destructive         |
 | Language support         | English & Russian (more can be added easily)                                                                 |
@@ -195,6 +199,60 @@ Adjust it easily by editing `ExportBuffer.format_line()`.
 * **pyrogram** – Telegram API wrapper.
 * **rich** – beautiful console output & progress bars.
 * **python-inquirer** – interactive check-lists.
+* **openai** – LLM client for AI analysis (works with both OpenAI API and Ollama).
+
+
+## 🧠 AI-powered analysis
+
+Telegram Cleaner can analyze your messages using a Large Language Model (LLM) to detect
+potential violations of Russian legislation. Two providers are supported:
+
+### Ollama (local, default)
+
+Run the LLM on your own machine — no data leaves your network.
+
+```bash
+# Install Ollama: https://ollama.ai
+ollama pull llama3.2:3b
+```
+
+Default configuration (auto-detected):
+- `AI_PROVIDER=ollama`
+- `OLLAMA_URL=http://172.31.240.1:11434`
+- `OLLAMA_MODEL=llama3.2:3b`
+
+### OpenAI (cloud)
+
+Uses OpenAI API or any OpenAI-compatible API.
+
+```bash
+# Get API key from https://platform.openai.com
+```
+
+Configure in `cache.json`:
+- `AI_PROVIDER=openai`
+- `OPENAI_API_KEY=sk-...`
+- `OPENAI_MODEL=gpt-4o-mini`
+
+### Available AI actions
+
+When you select chats, the following AI-powered actions appear in the menu:
+
+| Action | Description |
+|--------|-------------|
+| **AI: Analyze text for RU law violations** | Scans all text messages and reports which ones may violate Russian legislation |
+| **AI: Analyze text, photos, videos, audio for RU law violations** | Same as above, but also includes media messages (caption text is analyzed) |
+| **AI: Analyze text & DELETE (for everyone) if violation found** | Analyzes text messages and automatically deletes violating ones with `revoke=True` |
+| **AI: Analyze all media & DELETE (for everyone) if violation found** | Analyzes all messages including media and deletes violating ones for everyone |
+
+### How it works
+
+1. Each message is sent to the LLM with a system prompt describing 8 articles of Russian law
+2. The LLM returns a JSON response: `{"is_violation": true/false, "confidence": 0.0-1.0, "articles": [...], "reason": "..."}`
+3. If a violation is detected, the message is flagged (and optionally deleted)
+4. The analysis is conservative — only clear violations are reported
+
+> **Note:** The system prompt and full list of checked articles are in [`RUSSIAN_LAWS.md`](RUSSIAN_LAWS.md).
 
 
 ## 🧩 Advanced usage

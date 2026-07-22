@@ -1,0 +1,12 @@
+{
+  "API_ID": 12345,
+  "API_HASH": "your_api_hash_here",
+  "LANG": "ru",
+  "SIMULTANEOUS_PROCESSORS": 3,
+  "AI_PROVIDER": "ollama",
+  "OLLAMA_URL": "http://172.31.240.1:11434",
+  "OLLAMA_MODEL": "llama3.2:3b",
+  "OPENAI_API_KEY": "",
+  "OPENAI_MODEL": "gpt-4o-mini",
+  "OPENAI_BASE_URL": "https://api.openai.com/v1"
+}
