@@ -20,6 +20,14 @@ class Config:
     OPENAI_API_KEY: str = field(default="")
     OPENAI_MODEL: str = field(default="gpt-4o-mini")
     OPENAI_BASE_URL: str = field(default="https://api.openai.com/v1")
+    # Proxy settings
+    MTPROTO_ENABLED: bool = field(default=False)
+    MTPROTO_TYPE: str = field(default="socks5")
+    MTPROTO_HOST: str = field(default="")
+    MTPROTO_PORT: int = field(default=0)
+    MTPROTO_USER: str = field(default="")
+    MTPROTO_PASS: str = field(default="")
+    MTPROTO_SECRET: str = field(default="")
 
     def __post_init__(self) -> None:
         if not isinstance(self.API_ID, int):
@@ -30,6 +38,12 @@ class Config:
             raise ValueError(f"unknown language: {self.LANG}")
         if self.AI_PROVIDER not in ("ollama", "openai"):
             raise ValueError(f"unknown AI provider: {self.AI_PROVIDER}")
+        if self.MTPROTO_TYPE not in ("socks5", "http", "mtproto"):
+            raise ValueError(f"unknown proxy type: {self.MTPROTO_TYPE}")
+        if self.MTPROTO_ENABLED and not self.MTPROTO_HOST:
+            raise ValueError("MTPROTO_HOST must be set when proxy is enabled")
+        if self.MTPROTO_ENABLED and self.MTPROTO_PORT <= 0:
+            raise ValueError("MTPROTO_PORT must be > 0 when proxy is enabled")
 
     def save(self) -> None:
         CONFIG_CACHE.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2))

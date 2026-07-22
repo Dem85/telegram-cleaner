@@ -4,6 +4,7 @@ from functools import partial
 
 from rich.console import Console
 from telethon import TelegramClient
+from telethon.network import ConnectionTcpMTProxyRandomizedIntermediate
 
 from telegram_cleaner.cleaner import Cleaner
 from telegram_cleaner.config import Config
@@ -15,16 +16,60 @@ from telegram_cleaner.ui import TerminalUI
 logging_configure()
 
 
+def _build_proxy(config: Config) -> tuple | None:
+    """Build a proxy for Telethon if proxy is enabled.
+
+    For ``socks5`` and ``http`` returns a standard tuple
+    ``(type, host, port[, user, password])``.
+
+    For ``mtproto`` returns ``(host, port, secret)`` tuple where
+    ``secret`` is ``bytes`` decoded from the hex string stored in
+    ``MTPROTO_SECRET`` config field.
+
+    Returns ``None`` when proxy is disabled.
+    """
+    if not config.MTPROTO_ENABLED:
+        return None
+    proxy_type = config.MTPROTO_TYPE
+    host = config.MTPROTO_HOST
+    port = config.MTPROTO_PORT
+
+    if proxy_type == "mtproto":
+        secret = config.MTPROTO_SECRET
+        if isinstance(secret, bytes):
+            secret = secret.hex()
+        else:
+            secret = secret.removeprefix("0x")
+        return (host, port, secret)
+
+    user = config.MTPROTO_USER
+    password = config.MTPROTO_PASS
+    if user and password:
+        return (proxy_type, host, port, user, password)
+    return (proxy_type, host, port)
+
+
 async def main() -> None:
     config = Config.load()
     terminal_ui = TerminalUI(console=Console(), translator=Translator(config.LANG))
+    proxy = _build_proxy(config)
+
+    # For MTProto proxy we need a special connection type
+    connection = (
+        ConnectionTcpMTProxyRandomizedIntermediate
+        if config.MTPROTO_ENABLED and config.MTPROTO_TYPE == "mtproto"
+        else None
+    )
+
     client = TelegramClient(
         session="cleaner_session",
         api_id=config.API_ID,
         api_hash=config.API_HASH,
+        proxy=proxy,
+        connection=connection,
         app_version="1.2.3",
         device_model="PC",
-        system_version="Linux"
+        system_version="Linux",
     )
     export_buffer = ExportBuffer()
     cache = defaultdict(partial(defaultdict, list))

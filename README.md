@@ -153,7 +153,7 @@ uv pip install -e .[dev,test]
 
 ## 🔑 First-time configuration
 
-Telegram Cleaner needs a _user_ API ID / Hash – create them once at  
+Telegram Cleaner needs a _user_ API ID / Hash – create them once at
 https://my.telegram.org/apps (they are free).
 
 On the **first launch** the program will ask you:
@@ -162,8 +162,11 @@ On the **first launch** the program will ask you:
 * **API ID**
 * **API Hash**
 
-The answers are stored in `src/telegram_cleaner/cache.json`.  
+The answers are stored in `src/telegram_cleaner/cache.json`.
 You can delete/modify this file at any moment to re-configure the tool.
+
+> **MTProto proxy**: If you need to connect through a proxy, add the corresponding
+> fields to `cache.json` manually (see [Advanced usage](#-advanced-usage)).
 
 
 ## ▶️ Usage
@@ -260,6 +263,67 @@ When you select chats, the following AI-powered actions appear in the menu:
 * Add a new language or change the existing one - edit `constants.TRANSLATIONS`.
 * Logs can be found in `logs/cleaner.log`.
 * This is not recommended, but you can reduce `SAFE_TELEGRAM_WAIT_TIME` to speed up message processing.
+
+### Proxy (SOCKS5 / HTTP / MTProto)
+
+If your network requires a proxy to connect to Telegram, you can configure it in
+`cache.json`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `MTPROTO_ENABLED` | `bool` | `false` | Set to `true` to enable the proxy |
+| `MTPROTO_TYPE` | `str` | `"socks5"` | Proxy type: `"socks5"`, `"http"`, or `"mtproto"` |
+| `MTPROTO_HOST` | `str` | `""` | Proxy hostname or IP address |
+| `MTPROTO_PORT` | `int` | `0` | Proxy port |
+| `MTPROTO_USER` | `str` | `""` | Proxy username (optional, SOCKS5/HTTP only) |
+| `MTPROTO_PASS` | `str` | `""` | Proxy password (optional, SOCKS5/HTTP only) |
+| `MTPROTO_SECRET` | `str` | `""` | MTProto proxy secret (required when `MTPROTO_TYPE=mtproto`) |
+
+#### SOCKS5 / HTTP examples
+
+SOCKS5 with authentication:
+
+```json
+{
+  "MTPROTO_ENABLED": true,
+  "MTPROTO_TYPE": "socks5",
+  "MTPROTO_HOST": "127.0.0.1",
+  "MTPROTO_PORT": 1080,
+  "MTPROTO_USER": "user",
+  "MTPROTO_PASS": "password"
+}
+```
+
+HTTP proxy without authentication:
+
+```json
+{
+  "MTPROTO_ENABLED": true,
+  "MTPROTO_TYPE": "http",
+  "MTPROTO_HOST": "192.168.1.1",
+  "MTPROTO_PORT": 8080
+}
+```
+
+#### MTProto proxy
+
+For MTProto proxy you need to provide the **secret** (usually a hex string or
+a base64-encoded string that may start with `ee` for fake-TLS mode):
+
+```json
+{
+  "MTPROTO_ENABLED": true,
+  "MTPROTO_TYPE": "mtproto",
+  "MTPROTO_HOST": "proxy.example.com",
+  "MTPROTO_PORT": 443,
+  "MTPROTO_SECRET": "ee000000000000000000000000000000"
+}
+```
+
+> **Note:** When `MTPROTO_TYPE=mtproto`, the program automatically uses
+> `ConnectionTcpMTProxyRandomizedIntermediate` as the connection type and
+> passes `(host, port, secret)` to `TelegramClient(proxy=...)`.
+> `MTPROTO_USER` and `MTPROTO_PASS` are ignored for MTProto proxies.
 
 
 
