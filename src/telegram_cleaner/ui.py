@@ -59,7 +59,11 @@ class TerminalUI:
             self.console.print(f"[red]{self.translate('no_dialogs')}[/red]")
             return []
 
+        SELECT_ALL_MARKER = -1
         choices = [(f"{get_display_name(chat)}", chat.id) for chat in chats]
+        select_all_choice = (self.translate("select_all"), SELECT_ALL_MARKER)
+        choices.insert(0, select_all_choice)
+
         answer = (
             inquirer.prompt(
                 [
@@ -75,6 +79,10 @@ class TerminalUI:
             or {}
         )
         picked_ids: list[int] = answer.get("chats", [])
+
+        if SELECT_ALL_MARKER in picked_ids:
+            return list(chats)
+
         if not picked_ids:
             self.console.print(
                 f"[yellow]{self.translate('nothing_chosen_chats')}[/yellow]"

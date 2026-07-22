@@ -62,7 +62,38 @@ class Config:
         )
         api_id = int(Prompt.ask("Telegram API ID"))
         api_hash = Prompt.ask("Telegram API hash")
-        cfg = cls(API_ID=api_id, API_HASH=api_hash, LANG=lang)
+        use_proxy = Prompt.ask(
+            "Use proxy?" if lang == "en" else "Использовать прокси?",
+            choices=["y", "n"],
+            default="n",
+        )
+        if use_proxy == "y":
+            proxy_type = Prompt.ask(
+                "Proxy type" if lang == "en" else "Тип прокси",
+                choices=["socks5", "http", "mtproto"],
+                default="socks5",
+            )
+            proxy_host = Prompt.ask(
+                "Proxy host" if lang == "en" else "Хост прокси",
+            )
+            proxy_port = int(Prompt.ask(
+                "Proxy port" if lang == "en" else "Порт прокси",
+            ))
+            proxy_secret = ""
+            if proxy_type == "mtproto":
+                proxy_secret = Prompt.ask(
+                    "MTProto secret (hex)" if lang == "en" else "MTProto секрет (hex)",
+                )
+            cfg = cls(
+                API_ID=api_id, API_HASH=api_hash, LANG=lang,
+                MTPROTO_ENABLED=True,
+                MTPROTO_TYPE=proxy_type,
+                MTPROTO_HOST=proxy_host,
+                MTPROTO_PORT=proxy_port,
+                MTPROTO_SECRET=proxy_secret,
+            )
+        else:
+            cfg = cls(API_ID=api_id, API_HASH=api_hash, LANG=lang)
         cfg.save()
         return cfg
 
