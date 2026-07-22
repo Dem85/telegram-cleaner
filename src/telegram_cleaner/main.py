@@ -55,22 +55,21 @@ async def main() -> None:
     proxy = _build_proxy(config)
 
     # For MTProto proxy we need a special connection type
-    connection = (
-        ConnectionTcpMTProxyRandomizedIntermediate
-        if config.MTPROTO_ENABLED and config.MTPROTO_TYPE == "mtproto"
-        else None
-    )
+    use_mtproto = config.MTPROTO_ENABLED and config.MTPROTO_TYPE == "mtproto"
 
-    client = TelegramClient(
+    client_kwargs = dict(
         session="cleaner_session",
         api_id=config.API_ID,
         api_hash=config.API_HASH,
         proxy=proxy,
-        connection=connection,
         app_version="1.2.3",
         device_model="PC",
         system_version="Linux",
     )
+    if use_mtproto:
+        client_kwargs["connection"] = ConnectionTcpMTProxyRandomizedIntermediate
+
+    client = TelegramClient(**client_kwargs)
     export_buffer = ExportBuffer()
     cache = defaultdict(partial(defaultdict, list))
 
@@ -81,4 +80,11 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running event loop — safe to use asyncio.run()
+        asyncio.run(main())
+    else:
+        # Already running in an event loop (e.g. debugpy)
+        loop.create_task(main())

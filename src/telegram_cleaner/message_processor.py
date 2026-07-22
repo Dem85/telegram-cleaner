@@ -340,12 +340,8 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
 
     def _get_message_text(self, msg: Message) -> str:
         """Extract text from a message, including caption for media."""
-        text_parts = []
-        if msg.text:
-            text_parts.append(msg.text)
-        if msg.caption:
-            text_parts.append(msg.caption)
-        return "\n".join(text_parts).strip()
+        # msg.message contains both the text and the media caption in Telethon
+        return (msg.message or "").strip()
 
     def _has_media(self, msg: Message) -> bool:
         """Check if message has media content."""
