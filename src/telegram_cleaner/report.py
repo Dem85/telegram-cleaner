@@ -79,6 +79,20 @@ def write_deletion_report(
                 msg_date = str(msg.date)
 
         msg_text = (msg.message or "").strip().replace("\n", " ")
+        # For media messages without text, show media type
+        if not msg_text and msg.media:
+            if msg.photo:
+                msg_text = "[фото]"
+            elif msg.video or msg.video_note:
+                msg_text = "[видео/кружок]"
+            elif msg.voice or msg.audio:
+                msg_text = "[аудио]"
+            elif msg.document:
+                # Show document name if available
+                doc_name = getattr(msg.document, "file_name", None) or "документ"
+                msg_text = f"[документ: {doc_name}]"
+            else:
+                msg_text = "[медиа]"
         # Truncate very long messages for readability
         if len(msg_text) > 500:
             msg_text = msg_text[:500] + "..."

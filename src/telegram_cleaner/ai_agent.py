@@ -6,10 +6,14 @@ Supports two providers:
 
 Features batch processing: multiple messages are sent in a single LLM call
 to reduce API costs (one request per batch instead of per-message).
+
+Supports vision analysis: when media (photo) is provided alongside text,
+the image is sent to a multimodal LLM for content analysis.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from dataclasses import dataclass, field
@@ -26,7 +30,7 @@ from rich.console import Console
 logger = logging.getLogger(__name__)
 console = Console()
 
-SYSTEM_PROMPT = """Ты — юридический анализатор текста. Твоя задача — проверить, содержит ли переданное сообщение признаки нарушения российского законодательства.
+SYSTEM_PROMPT = """Ты — юридический анализатор текста и изображений. Твоя задача — проверить, содержит ли переданное сообщение (текст и/или изображение) признаки нарушения российского законодательства.
 
 Проверяй сообщение по следующим статьям:
 
@@ -62,6 +66,12 @@ SYSTEM_PROMPT = """Ты — юридический анализатор текс
    - Распространение материалов, включённых в федеральный список экстремистских
    - Признаки: ссылки на запрещённые организации, цитирование экстремистской литературы
 
+Если к сообщению приложено изображение — проанализируй и его содержимое.
+Обращай внимание на изображения, которые могут содержать:
+- Нацистскую или экстремистскую символику (ст. 20.3 КоАП РФ, ст. 282 УК РФ)
+- Призывы к противоправным действиям на плакатах, скриншотах
+- Дискредитацию ВС РФ на изображениях (ст. 280.3 УК РФ)
+
 Ответ верни строго в формате JSON:
 {
   "is_violation": true/false,
@@ -78,7 +88,7 @@ SYSTEM_PROMPT = """Ты — юридический анализатор текс
   "reason": ""
 }
 
-Анализируй только текст сообщения. Не добавляй отсебятину. Будь консервативен — отмечай только явные нарушения."""
+Анализируй только содержимое сообщения. Не добавляй отсебятину. Будь консервативен — отмечай только явные нарушения."""
 
 BATCH_SYSTEM_PROMPT = """Ты — юридический анализатор текста. Твоя задача — проверить несколько сообщений на признаки нарушения российского законодательства.
 
@@ -127,6 +137,19 @@ class AIProvider(str, Enum):
 
 
 @dataclass(slots=True)
+class MediaData:
+    """Media content for AI vision analysis.
+
+    Attributes:
+        data: Raw bytes of the media file.
+        mime_type: MIME type (e.g. 'image/jpeg', 'image/png').
+    """
+
+    data: bytes
+    mime_type: str
+
+
+@dataclass(slots=True)
 class AIAnalysisResult:
     """Result of AI analysis of a message."""
 
@@ -153,6 +176,9 @@ class AIConfig:
     max_retries: int = 3
     # Batch processing
     batch_size: int = 100
+    # Vision (image analysis)
+    vision_enabled: bool = True
+    max_image_size: int = 10 * 1024 * 1024  # 10 MB max image size
     # Debug
     ai_debug: bool = False
 
@@ -272,6 +298,53 @@ class AIAgent:
             logger.warning("AI analysis failed for message: %s", e)
             return AIAnalysisResult(is_violation=False, confidence=0.0)
 
+    async def analyze_with_media(
+        self,
+        text: str,
+        media: MediaData | None = None,
+    ) -> AIAnalysisResult:
+        """Analyze a message with optional image content via vision API.
+
+        If media is provided and vision is enabled, the image is sent
+        alongside the text to a multimodal LLM.
+
+        Args:
+            text: The message text to analyze.
+            media: Optional image data for vision analysis.
+
+        Returns:
+            AIAnalysisResult with violation detection results.
+        """
+        if not text and not media:
+            return AIAnalysisResult(is_violation=False, confidence=0.0)
+
+        await self._ensure_initialized()
+
+        if self.config.ai_debug:
+            logger.info("=== AI DEBUG: Request (with media) ===\n%s", text or "(no text)")
+            console.print("[bold yellow]━━━ AI DEBUG: Request (with media) ━━━[/bold yellow]")
+            console.print(text or "(no text)")
+            if media:
+                console.print(f"[dim]Media: {len(media.data)} bytes, {media.mime_type}[/dim]")
+            console.print("[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
+
+        try:
+            if media and self.config.vision_enabled:
+                response = await self._call_llm_with_media(text, media)
+            else:
+                response = await self._call_llm(text or "")
+
+            if self.config.ai_debug:
+                logger.info("=== AI DEBUG: Response ===\n%s", response)
+                console.print("[bold cyan]━━━ AI DEBUG: Response ━━━[/bold cyan]")
+                console.print(response)
+                console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
+
+            return self._parse_response(response)
+        except Exception as e:
+            logger.warning("AI analysis with media failed for message: %s", e)
+            return AIAnalysisResult(is_violation=False, confidence=0.0)
+
     async def _call_llm(self, text: str) -> str:
         """Call the LLM and return raw response text."""
         from openai import NOT_GIVEN
@@ -285,6 +358,50 @@ class AIAgent:
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": f"Сообщение для анализа:\n\n{text}"},
+            ],
+            temperature=0.1,
+            max_tokens=500,
+            response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+        )
+        return completion.choices[0].message.content or ""
+
+    async def _call_llm_with_media(self, text: str, media: MediaData) -> str:
+        """Call the LLM with text and an image for vision analysis.
+
+        Builds a multimodal message with the image encoded as base64 data URL.
+        Works with both Ollama (vision models like llava, minicpm-v) and
+        OpenAI (gpt-4o, gpt-4o-mini with vision support).
+        """
+        from openai import NOT_GIVEN
+
+        # Encode image as base64 data URL
+        image_base64 = base64.b64encode(media.data).decode("utf-8")
+        image_data_url = f"data:{media.mime_type};base64,{image_base64}"
+
+        # Build multimodal user message
+        user_content: list[dict] = [
+            {
+                "type": "text",
+                "text": f"Сообщение для анализа:\n\n{text}" if text else "Проанализируй содержимое изображения.",
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": image_data_url,
+                    "detail": "auto",  # Let the model decide detail level
+                },
+            },
+        ]
+
+        completion = await self._client.chat.completions.create(
+            model=(
+                self.config.ollama_model
+                if self.config.provider == AIProvider.OLLAMA
+                else self.config.openai_model
+            ),
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.1,
             max_tokens=500,

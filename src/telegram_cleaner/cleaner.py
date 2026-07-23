@@ -81,6 +81,8 @@ class Cleaner:
                 batch_size=self.config.AI_BATCH_SIZE,
                 timeout=self.config.AI_TIMEOUT,
                 ai_debug=self.config.AI_DEBUG,
+                vision_enabled=self.config.AI_VISION_ENABLED,
+                max_image_size=self.config.AI_MAX_IMAGE_SIZE,
             )
             self._ai_agent = AIAgent(config=ai_config)
         return self._ai_agent

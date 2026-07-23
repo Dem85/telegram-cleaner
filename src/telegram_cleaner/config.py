@@ -23,6 +23,9 @@ class Config:
     AI_DEBUG: bool = field(default=False)
     AI_BATCH_SIZE: int = field(default=100)
     AI_TIMEOUT: int = field(default=120)
+    # Vision (image analysis) settings
+    AI_VISION_ENABLED: bool = field(default=True)
+    AI_MAX_IMAGE_SIZE: int = field(default=10 * 1024 * 1024)  # 10 MB
     # Related messages deletion settings
     AI_RELATED_MINUTES: int = field(default=60)
     # Proxy settings

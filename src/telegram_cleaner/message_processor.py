@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
@@ -14,7 +15,7 @@ from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import Channel, Chat, Message, ReactionEmpty, User
 
 from telegram_cleaner.actions import Action
-from telegram_cleaner.ai_agent import AIAgent, AIConfig, AIProvider, AIAnalysisResult
+from telegram_cleaner.ai_agent import AIAgent, AIConfig, AIProvider, AIAnalysisResult, MediaData
 from telegram_cleaner.error_handlers import retry_on_flood_wait
 from telegram_cleaner.report import write_deletion_report
 from telegram_cleaner import constants
@@ -308,14 +309,17 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
     to reduce LLM API costs. Supports incremental flushing:
     when the pending buffer reaches batch_size, messages are sent to AI
     immediately without waiting for the end of iteration.
+
+    Supports vision analysis: when include_media is True, photos are
+    downloaded and sent to a multimodal LLM alongside the text.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._ai_agent: AIAgent | None = None
         self._violation_message_ids: list[int] = []
-        # Buffer for batch analysis: list of (message_id, analysis_text)
-        self._pending_messages: list[tuple[int, str]] = []
+        # Buffer for batch analysis: list of (message_id, analysis_text, media_or_none)
+        self._pending_messages: list[tuple[int, str, Any]] = []
         # Total number of messages sent to AI (for logging)
         self._total_analyzed: int = 0
 
@@ -331,6 +335,8 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
             batch_size=config.AI_BATCH_SIZE,
             timeout=config.AI_TIMEOUT,
             ai_debug=config.AI_DEBUG,
+            vision_enabled=config.AI_VISION_ENABLED,
+            max_image_size=config.AI_MAX_IMAGE_SIZE,
         )
         self._ai_agent = AIAgent(config=ai_config)
 
@@ -365,13 +371,53 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
         """Check if message has media content."""
         return bool(msg.media)
 
+    def _is_photo(self, msg: Message) -> bool:
+        """Check if message contains a photo."""
+        return bool(msg.photo)
+
+    async def _download_media(self, msg: Message) -> MediaData | None:
+        """Download photo media from a message as bytes.
+
+        Only downloads photos (not video/audio) for vision analysis.
+        Returns None if media is not a photo or download fails.
+        """
+        if not self._is_photo(msg):
+            return None
+
+        try:
+            # Download photo as bytes
+            buffer = io.BytesIO()
+            await self.client.download_media(msg.media, buffer)
+            buffer.seek(0)
+            data = buffer.read()
+
+            # Determine MIME type from photo attributes
+            mime_type = "image/jpeg"  # default for Telegram photos
+            if msg.file and msg.file.mime_type:
+                mime_type = msg.file.mime_type
+
+            logger.debug(
+                "Downloaded photo: msg_id=%s, size=%d bytes, mime=%s",
+                msg.id,
+                len(data),
+                mime_type,
+            )
+            return MediaData(data=data, mime_type=mime_type)
+        except Exception as e:
+            logger.warning("Failed to download media for msg_id=%s: %s", msg.id, e)
+            return None
+
     async def _flush_pending(self) -> None:
-        """Run batch analysis on all pending messages and clear the buffer."""
+        """Run analysis on all pending messages and clear the buffer.
+
+        Messages with media are analyzed individually via vision API.
+        Text-only messages are analyzed in batch for efficiency.
+        """
         if not self._pending_messages:
             logger.debug("No pending messages for batch analysis")
             return
 
-        msg_ids = [mid for mid, _ in self._pending_messages]
+        msg_ids = [mid for mid, _, _ in self._pending_messages]
         logger.debug(
             "Starting batch analysis: %d messages, ids=%s",
             len(self._pending_messages),
@@ -380,11 +426,32 @@ class BaseAIAnalyzeProcessor(MessageProcessor, ABC):
         if len(msg_ids) > 10:
             logger.debug("... and %d more messages", len(msg_ids) - 10)
 
-        texts = [text for _, text in self._pending_messages]
-        results = await self._ai_agent.analyze_batch(texts)
+        # Separate messages with and without media
+        text_only: list[tuple[int, str]] = []
+        with_media: list[tuple[int, str, MediaData]] = []
+
+        for msg_id, text, media in self._pending_messages:
+            if media is not None:
+                with_media.append((msg_id, text, media))
+            else:
+                text_only.append((msg_id, text))
+
+        results: list[tuple[int, AIAnalysisResult]] = []
+
+        # Process text-only messages in batch
+        if text_only:
+            texts = [text for _, text in text_only]
+            batch_results = await self._ai_agent.analyze_batch(texts)
+            for (msg_id, _), result in zip(text_only, batch_results):
+                results.append((msg_id, result))
+
+        # Process messages with media individually (vision API)
+        for msg_id, text, media in with_media:
+            result = await self._ai_agent.analyze_with_media(text, media)
+            results.append((msg_id, result))
 
         violations_found = 0
-        for (msg_id, _), result in zip(self._pending_messages, results):
+        for msg_id, result in results:
             if result.is_violation:
                 self._violation_message_ids.append(msg_id)
                 violations_found += 1
@@ -433,8 +500,8 @@ class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
             logger.debug("Skipping empty text message: msg_id=%s", msg.id)
             return True  # skip empty messages
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, text))
+        # Buffer the message for batch analysis (no media)
+        self._pending_messages.append((msg.id, text, None))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
@@ -463,7 +530,11 @@ class AIAnalyzeTextProcessor(BaseAIAnalyzeProcessor):
 
 
 class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
-    """Analyze text and media messages for legal violations."""
+    """Analyze text and media messages for legal violations.
+
+    When a message contains a photo, it is downloaded and sent to a
+    multimodal LLM (vision API) for content analysis alongside the text.
+    """
 
     @property
     def include_media(self) -> bool:
@@ -475,20 +546,31 @@ class AIAnalyzeAllProcessor(BaseAIAnalyzeProcessor):
             logger.debug("Skipping empty message (no text, no media): msg_id=%s", msg.id)
             return True  # skip empty messages
 
-        # For media messages, include media type info in analysis
+        # Download photo if present (for vision analysis)
+        media: MediaData | None = None
+        if self._is_photo(msg):
+            media = await self._download_media(msg)
+            if media is not None:
+                logger.debug(
+                    "Downloaded photo for vision analysis: msg_id=%s, size=%d bytes",
+                    msg.id,
+                    len(media.data),
+                )
+
+        # For non-photo media without text, include type info
         analysis_text = text
-        if self._has_media(msg) and not analysis_text:
-            # If only media without text, we still note it
+        if self._has_media(msg) and not analysis_text and media is None:
             analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, analysis_text))
+        # Buffer the message for analysis
+        self._pending_messages.append((msg.id, analysis_text, media))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
-            "Buffered message for AI analysis: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            "Buffered message for AI analysis: msg_id=%s, has_media=%s, has_photo=%s, text_len=%d, text_preview=%s",
             msg.id,
             self._has_media(msg),
+            self._is_photo(msg),
             len(analysis_text),
             analysis_text[:100],
         )
@@ -571,12 +653,16 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         return True
 
     async def _flush_pending(self) -> None:
-        """Run batch analysis and immediately delete any violations found."""
+        """Run analysis and immediately delete any violations found.
+
+        Messages with media are analyzed individually via vision API.
+        Text-only messages are analyzed in batch for efficiency.
+        """
         if not self._pending_messages:
             logger.debug("No pending messages for batch analysis")
             return
 
-        msg_ids = [mid for mid, _ in self._pending_messages]
+        msg_ids = [mid for mid, _, _ in self._pending_messages]
         logger.debug(
             "Starting batch analysis: %d messages, ids=%s",
             len(self._pending_messages),
@@ -585,11 +671,32 @@ class BaseAIAnalyzeAndDeleteProcessor(BaseAIAnalyzeProcessor, ABC):
         if len(msg_ids) > 10:
             logger.debug("... and %d more messages", len(msg_ids) - 10)
 
-        texts = [text for _, text in self._pending_messages]
-        results = await self._ai_agent.analyze_batch(texts)
+        # Separate messages with and without media
+        text_only: list[tuple[int, str]] = []
+        with_media: list[tuple[int, str, MediaData]] = []
+
+        for msg_id, text, media in self._pending_messages:
+            if media is not None:
+                with_media.append((msg_id, text, media))
+            else:
+                text_only.append((msg_id, text))
+
+        results: list[tuple[int, AIAnalysisResult]] = []
+
+        # Process text-only messages in batch
+        if text_only:
+            texts = [text for _, text in text_only]
+            batch_results = await self._ai_agent.analyze_batch(texts)
+            for (msg_id, _), result in zip(text_only, batch_results):
+                results.append((msg_id, result))
+
+        # Process messages with media individually (vision API)
+        for msg_id, text, media in with_media:
+            result = await self._ai_agent.analyze_with_media(text, media)
+            results.append((msg_id, result))
 
         new_violations: list[int] = []
-        for (msg_id, _), result in zip(self._pending_messages, results):
+        for msg_id, result in results:
             if result.is_violation:
                 self._violation_message_ids.append(msg_id)
                 new_violations.append(msg_id)
@@ -798,8 +905,8 @@ class AIAnalyzeAndDeleteTextProcessor(BaseAIAnalyzeAndDeleteProcessor):
             logger.debug("Skipping other user's message (delete mode): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, text))
+        # Buffer the message for batch analysis (no media)
+        self._pending_messages.append((msg.id, text, None))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
@@ -822,6 +929,9 @@ class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
     Iterates ALL messages in the chat. Only the user's own messages
     are analyzed by AI. Related messages (replies, time window) of ANY author
     are deleted along with violations.
+
+    When a message contains a photo, it is downloaded and sent to a
+    multimodal LLM (vision API) for content analysis alongside the text.
     """
 
     @property
@@ -842,18 +952,31 @@ class AIAnalyzeAndDeleteAllProcessor(BaseAIAnalyzeAndDeleteProcessor):
             logger.debug("Skipping other user's message (delete mode, all): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
+        # Download photo if present (for vision analysis)
+        media: MediaData | None = None
+        if self._is_photo(msg):
+            media = await self._download_media(msg)
+            if media is not None:
+                logger.debug(
+                    "Downloaded photo for vision analysis: msg_id=%s, size=%d bytes",
+                    msg.id,
+                    len(media.data),
+                )
+
+        # For non-photo media without text, include type info
         analysis_text = text
-        if self._has_media(msg) and not analysis_text:
+        if self._has_media(msg) and not analysis_text and media is None:
             analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, analysis_text))
+        # Buffer the message for analysis
+        self._pending_messages.append((msg.id, analysis_text, media))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
-            "Buffered own message for AI analysis + delete: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            "Buffered own message for AI analysis + delete: msg_id=%s, has_media=%s, has_photo=%s, text_len=%d, text_preview=%s",
             msg.id,
             self._has_media(msg),
+            self._is_photo(msg),
             len(analysis_text),
             analysis_text[:100],
         )
@@ -913,8 +1036,8 @@ class AIAnalyzeAndDeleteWithRelatedTextProcessor(BaseAIAnalyzeAndDeleteWithRelat
             logger.debug("Skipping other user's message (delete+related mode): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, text))
+        # Buffer the message for batch analysis (no media)
+        self._pending_messages.append((msg.id, text, None))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
@@ -955,18 +1078,31 @@ class AIAnalyzeAndDeleteWithRelatedAllProcessor(BaseAIAnalyzeAndDeleteWithRelate
             logger.debug("Skipping other user's message (delete+related mode, all): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
+        # Download photo if present (for vision analysis)
+        media: MediaData | None = None
+        if self._is_photo(msg):
+            media = await self._download_media(msg)
+            if media is not None:
+                logger.debug(
+                    "Downloaded photo for vision analysis: msg_id=%s, size=%d bytes",
+                    msg.id,
+                    len(media.data),
+                )
+
+        # For non-photo media without text, include type info
         analysis_text = text
-        if self._has_media(msg) and not analysis_text:
+        if self._has_media(msg) and not analysis_text and media is None:
             analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, analysis_text))
+        # Buffer the message for analysis
+        self._pending_messages.append((msg.id, analysis_text, media))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
-            "Buffered own message for AI analysis + delete+related: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            "Buffered own message for AI analysis + delete+related: msg_id=%s, has_media=%s, has_photo=%s, text_len=%d, text_preview=%s",
             msg.id,
             self._has_media(msg),
+            self._is_photo(msg),
             len(analysis_text),
             analysis_text[:100],
         )
@@ -1081,8 +1217,8 @@ class AIAnalyzeAndDeleteOwnAndRepliesTextProcessor(BaseAIAnalyzeAndDeleteOwnAndR
             logger.debug("Skipping other user's message (own+replies mode): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, text))
+        # Buffer the message for batch analysis (no media)
+        self._pending_messages.append((msg.id, text, None))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
@@ -1105,6 +1241,9 @@ class AIAnalyzeAndDeleteOwnAndRepliesAllProcessor(BaseAIAnalyzeAndDeleteOwnAndRe
     Iterates ALL messages in the chat. Only the user's own messages
     are analyzed by AI. Related messages (replies) of ANY author
     are deleted along with violations.
+
+    When a message contains a photo, it is downloaded and sent to a
+    multimodal LLM (vision API) for content analysis alongside the text.
     """
 
     @property
@@ -1125,18 +1264,31 @@ class AIAnalyzeAndDeleteOwnAndRepliesAllProcessor(BaseAIAnalyzeAndDeleteOwnAndRe
             logger.debug("Skipping other user's message (own+replies mode, all): msg_id=%s, sender=%s", msg.id, msg.sender_id)
             return True
 
+        # Download photo if present (for vision analysis)
+        media: MediaData | None = None
+        if self._is_photo(msg):
+            media = await self._download_media(msg)
+            if media is not None:
+                logger.debug(
+                    "Downloaded photo for vision analysis: msg_id=%s, size=%d bytes",
+                    msg.id,
+                    len(media.data),
+                )
+
+        # For non-photo media without text, include type info
         analysis_text = text
-        if self._has_media(msg) and not analysis_text:
+        if self._has_media(msg) and not analysis_text and media is None:
             analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
 
-        # Buffer the message for batch analysis
-        self._pending_messages.append((msg.id, analysis_text))
+        # Buffer the message for analysis
+        self._pending_messages.append((msg.id, analysis_text, media))
         self.cache[self.action.value][self.chat.id].append(msg)
 
         logger.debug(
-            "Buffered own message for AI analysis + own+replies: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            "Buffered own message for AI analysis + own+replies: msg_id=%s, has_media=%s, has_photo=%s, text_len=%d, text_preview=%s",
             msg.id,
             self._has_media(msg),
+            self._is_photo(msg),
             len(analysis_text),
             analysis_text[:100],
         )
