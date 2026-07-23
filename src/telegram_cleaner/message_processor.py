@@ -986,3 +986,173 @@ class AIAnalyzeAndDeleteWithRelatedAllProcessor(BaseAIAnalyzeAndDeleteWithRelate
         if msg.document:
             return "документ"
         return "медиа"
+
+
+class BaseAIAnalyzeAndDeleteOwnAndRepliesProcessor(BaseAIAnalyzeAndDeleteProcessor, ABC):
+    """Base processor for AI analysis + deletion of violating messages
+    along with ONLY directly related messages (replies).
+
+    Unlike BaseAIAnalyzeAndDeleteProcessor, this processor does NOT collect
+    messages within the time window — only messages that are directly linked
+    by reply (parent/child).
+
+    Iterates ALL messages in the chat. Only the user's own messages
+    are analyzed by AI. Related messages (replies) of ANY author
+    are deleted along with violations.
+    """
+
+    async def finalize(self) -> None:
+        if self._ai_agent is None:
+            self._init_ai_agent(self._get_config())
+
+        # Flush any remaining pending messages (violations deleted immediately inside _flush_pending)
+        await self._flush_pending()
+
+        logger.debug(
+            "AI analysis complete: %d violations found out of %d total analyzed",
+            len(self._violation_message_ids),
+            self._total_analyzed,
+        )
+
+        # Collect related messages for each violation (only directly linked by reply)
+        for violation_id in self._violation_message_ids:
+            violation_msg = self._all_messages.get(violation_id)
+            if violation_msg is None:
+                continue
+
+            for msg_id, msg in self._all_messages.items():
+                if msg_id in self._related_message_ids or msg_id in self._violation_message_ids:
+                    continue
+
+                # 1. Messages that reply to the violating message (unconditional)
+                if msg.reply_to and msg.reply_to.reply_to_msg_id == violation_id:
+                    self._related_message_ids.add(msg_id)
+                    continue
+
+                # 2. Messages that are replied to by the violating message (unconditional)
+                if violation_msg.reply_to and violation_msg.reply_to.reply_to_msg_id == msg_id:
+                    self._related_message_ids.add(msg_id)
+                    continue
+
+        logger.debug(
+            "Collected %d related messages for %d violations",
+            len(self._related_message_ids),
+            len(self._violation_message_ids),
+        )
+
+        # Delete related messages (violations themselves are already deleted)
+        if self._related_message_ids:
+            ids_list = sorted(self._related_message_ids)
+            logger.debug(
+                "Deleting %d related messages in chunks of %d",
+                len(ids_list),
+                100,
+            )
+            await self._delete_message_ids(ids_list)
+            logger.debug("Successfully deleted all %d related messages", len(ids_list))
+        else:
+            logger.debug("No related messages to delete")
+
+
+class AIAnalyzeAndDeleteOwnAndRepliesTextProcessor(BaseAIAnalyzeAndDeleteOwnAndRepliesProcessor):
+    """Analyze text messages and delete violating ones (for everyone)
+    along with ONLY directly related messages (replies).
+
+    Iterates ALL messages in the chat. Only the user's own text messages
+    are analyzed by AI. Related messages (replies) of ANY author
+    are deleted along with violations.
+    """
+
+    @property
+    def include_media(self) -> bool:
+        return False
+
+    async def process(self, msg: Message) -> bool:
+        # Always store in _all_messages via super() first
+        await super().process(msg)
+
+        text = self._get_message_text(msg)
+        if not text:
+            logger.debug("Skipping empty text message (own+replies mode): msg_id=%s", msg.id)
+            return True
+
+        # Only analyze user's own messages
+        if msg.sender_id != self.me.id:
+            logger.debug("Skipping other user's message (own+replies mode): msg_id=%s, sender=%s", msg.id, msg.sender_id)
+            return True
+
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, text))
+        self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered own text message for AI analysis + own+replies: msg_id=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            len(text),
+            text[:100],
+        )
+
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
+
+        return True
+
+
+class AIAnalyzeAndDeleteOwnAndRepliesAllProcessor(BaseAIAnalyzeAndDeleteOwnAndRepliesProcessor):
+    """Analyze text and media messages and delete violating ones (for everyone)
+    along with ONLY directly related messages (replies).
+
+    Iterates ALL messages in the chat. Only the user's own messages
+    are analyzed by AI. Related messages (replies) of ANY author
+    are deleted along with violations.
+    """
+
+    @property
+    def include_media(self) -> bool:
+        return True
+
+    async def process(self, msg: Message) -> bool:
+        # Always store in _all_messages via super() first
+        await super().process(msg)
+
+        text = self._get_message_text(msg)
+        if not text and not self._has_media(msg):
+            logger.debug("Skipping empty message (own+replies mode, all): msg_id=%s", msg.id)
+            return True
+
+        # Only analyze user's own messages
+        if msg.sender_id != self.me.id:
+            logger.debug("Skipping other user's message (own+replies mode, all): msg_id=%s, sender=%s", msg.id, msg.sender_id)
+            return True
+
+        analysis_text = text
+        if self._has_media(msg) and not analysis_text:
+            analysis_text = f"[медиа-сообщение: {self._get_media_type(msg)}]"
+
+        # Buffer the message for batch analysis
+        self._pending_messages.append((msg.id, analysis_text))
+        self.cache[self.action.value][self.chat.id].append(msg)
+
+        logger.debug(
+            "Buffered own message for AI analysis + own+replies: msg_id=%s, has_media=%s, text_len=%d, text_preview=%s",
+            msg.id,
+            self._has_media(msg),
+            len(analysis_text),
+            analysis_text[:100],
+        )
+
+        # Incrementally flush to AI if buffer is full
+        await self._flush_pending_if_needed()
+
+        return True
+
+    def _get_media_type(self, msg: Message) -> str:
+        if msg.photo:
+            return "фото"
+        if msg.video or msg.video_note:
+            return "видео/кружок"
+        if msg.voice or msg.audio:
+            return "аудио"
+        if msg.document:
+            return "документ"
+        return "медиа"

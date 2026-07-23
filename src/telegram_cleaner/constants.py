@@ -8,6 +8,8 @@ from telegram_cleaner.actions import Action
 from telegram_cleaner.message_processor import (
     AIAnalyzeAllProcessor,
     AIAnalyzeAndDeleteAllProcessor,
+    AIAnalyzeAndDeleteOwnAndRepliesAllProcessor,
+    AIAnalyzeAndDeleteOwnAndRepliesTextProcessor,
     AIAnalyzeAndDeleteTextProcessor,
     AIAnalyzeAndDeleteWithRelatedAllProcessor,
     AIAnalyzeAndDeleteWithRelatedTextProcessor,
@@ -98,6 +100,8 @@ TRANSLATIONS = {
         "action_ai_analyze_and_delete_all": "AI: Analyze all media & DELETE (for everyone) if violation found",
         "action_ai_analyze_and_delete_with_related_text": "AI: Analyze text & DELETE with related msgs (replies, media, ±N hours)",
         "action_ai_analyze_and_delete_with_related_all": "AI: Analyze all media & DELETE with related msgs (replies, media, ±N hours)",
+        "action_ai_analyze_and_delete_own_and_replies_text": "AI: Analyze text & DELETE own + replies only",
+        "action_ai_analyze_and_delete_own_and_replies_all": "AI: Analyze all media & DELETE own + replies only",
         # AI progress
         "ai_analyzing": "AI analyzing",
         "ai_violations_found": "Violations found: {count}",
@@ -160,6 +164,8 @@ TRANSLATIONS = {
         "action_ai_analyze_and_delete_all": "ИИ: Анализ всех медиа и УДАЛЕНИЕ (у всех) при нарушении",
         "action_ai_analyze_and_delete_with_related_text": "ИИ: Анализ текста и УДАЛЕНИЕ со связанными (ответы, медиа, ±N ч)",
         "action_ai_analyze_and_delete_with_related_all": "ИИ: Анализ всех медиа и УДАЛЕНИЕ со связанными (ответы, медиа, ±N ч)",
+        "action_ai_analyze_and_delete_own_and_replies_text": "ИИ: Анализ текста и УДАЛЕНИЕ своих + ответы",
+        "action_ai_analyze_and_delete_own_and_replies_all": "ИИ: Анализ всех медиа и УДАЛЕНИЕ своих + ответы",
         # AI progress
         "ai_analyzing": "ИИ анализирует",
         "ai_violations_found": "Нарушений найдено: {count}",
@@ -186,4 +192,6 @@ ACTION_PROCESSOR_MAPPING = {
     Action.AI_ANALYZE_AND_DELETE_ALL: AIAnalyzeAndDeleteAllProcessor,
     Action.AI_ANALYZE_AND_DELETE_WITH_RELATED_TEXT: AIAnalyzeAndDeleteWithRelatedTextProcessor,
     Action.AI_ANALYZE_AND_DELETE_WITH_RELATED_ALL: AIAnalyzeAndDeleteWithRelatedAllProcessor,
+    Action.AI_ANALYZE_AND_DELETE_OWN_AND_REPLIES_TEXT: AIAnalyzeAndDeleteOwnAndRepliesTextProcessor,
+    Action.AI_ANALYZE_AND_DELETE_OWN_AND_REPLIES_ALL: AIAnalyzeAndDeleteOwnAndRepliesAllProcessor,
 }
