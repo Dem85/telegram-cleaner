@@ -13,6 +13,7 @@ the image is sent to a multimodal LLM for content analysis.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 
 
 
+import httpx
 from rich.console import Console
 
 logger = logging.getLogger(__name__)
@@ -179,6 +181,8 @@ class AIConfig:
     # Vision (image analysis)
     vision_enabled: bool = True
     max_image_size: int = 10 * 1024 * 1024  # 10 MB max image size
+    # Retry on 429 Too Many Requests
+    max_retries_on_429: int = 5  # additional retries beyond OpenAI client's built-in
     # Debug
     ai_debug: bool = False
 
@@ -264,6 +268,84 @@ class AIAgent:
             logger.error(msg)
             raise ImportError(msg) from e
 
+    async def _call_with_retry_on_429(
+        self,
+        coro_factory: Callable[[], Any],
+        context: str = "",
+    ) -> Any:
+        """Call an LLM coroutine with retry logic for 429 Too Many Requests.
+
+        The OpenAI client has its own built-in retry (max_retries), but it may
+        exhaust them if the rate limit reset time is longer than the client's
+        backoff. This method adds an additional layer of retry on top, using
+        the ``Retry-After`` or ``retry-after-ms`` headers from the response.
+
+        Args:
+            coro_factory: A zero-argument callable that returns an awaitable
+                (typically a partial or lambda wrapping an LLM call).
+            context: Optional description for log messages (e.g. "batch", "vision").
+
+        Raises:
+            httpx.HTTPStatusError: If all retries are exhausted.
+        """
+        max_retries = self.config.max_retries_on_429
+        last_exc: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                coro = coro_factory()
+                if asyncio.iscoroutine(coro):
+                    return await coro
+                msg = f"coro_factory did not return a coroutine, got {type(coro)}"
+                raise TypeError(msg)
+            except httpx.HTTPStatusError as e:
+                last_exc = e
+                if e.response.status_code != 429:
+                    raise  # Not a rate-limit error, re-raise immediately
+
+                # Extract retry-after duration from response headers
+                retry_after_ms = e.response.headers.get("retry-after-ms")
+                retry_after = e.response.headers.get("Retry-After")
+
+                if retry_after_ms is not None:
+                    try:
+                        wait_time = float(retry_after_ms) / 1000.0
+                    except (ValueError, TypeError):
+                        wait_time = 5.0
+                elif retry_after is not None:
+                    try:
+                        wait_time = float(retry_after)
+                    except (ValueError, TypeError):
+                        wait_time = 5.0
+                else:
+                    wait_time = 5.0
+
+                # Add a small buffer (10%) to be safe
+                wait_time *= 1.1
+
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        "429 Too Many Requests%s — retrying in %.1fs (attempt %d/%d)",
+                        f" ({context})" if context else "",
+                        wait_time,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(
+                        "429 Too Many Requests%s — all %d retries exhausted",
+                        f" ({context})" if context else "",
+                        max_retries,
+                    )
+                    raise
+
+        # Should not reach here, but just in case
+        if last_exc is not None:
+            raise last_exc
+        msg = "Unexpected: _call_with_retry_on_429 completed without result or exception"
+        raise RuntimeError(msg)
+
     async def analyze_text(self, text: str) -> AIAnalysisResult:
         """Analyze a single text message for legal violations.
 
@@ -279,7 +361,7 @@ class AIAgent:
         await self._ensure_initialized()
 
         if self.config.ai_debug:
-            logger.info("=== AI DEBUG: Request ===\n%s", text)
+            logger.debug("AI DEBUG: Request\n%s", text)
             console.print("[bold yellow]━━━ AI DEBUG: Request ━━━[/bold yellow]")
             console.print(text)
             console.print("[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
@@ -288,12 +370,26 @@ class AIAgent:
             response = await self._call_llm(text)
 
             if self.config.ai_debug:
-                logger.info("=== AI DEBUG: Response ===\n%s", response)
+                logger.debug("AI DEBUG: Response\n%s", response)
                 console.print("[bold cyan]━━━ AI DEBUG: Response ━━━[/bold cyan]")
                 console.print(response)
                 console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
 
             return self._parse_response(response)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.error(
+                    "AI analysis failed for message: 429 Too Many Requests "
+                    "(all %d retries exhausted)",
+                    self.config.max_retries_on_429,
+                )
+            else:
+                logger.warning(
+                    "AI analysis failed for message: HTTP %d %s",
+                    e.response.status_code,
+                    e.response.reason_phrase,
+                )
+            return AIAnalysisResult(is_violation=False, confidence=0.0)
         except Exception as e:
             logger.warning("AI analysis failed for message: %s", e)
             return AIAnalysisResult(is_violation=False, confidence=0.0)
@@ -321,7 +417,7 @@ class AIAgent:
         await self._ensure_initialized()
 
         if self.config.ai_debug:
-            logger.info("=== AI DEBUG: Request (with media) ===\n%s", text or "(no text)")
+            logger.debug("AI DEBUG: Request (with media)\n%s", text or "(no text)")
             console.print("[bold yellow]━━━ AI DEBUG: Request (with media) ━━━[/bold yellow]")
             console.print(text or "(no text)")
             if media:
@@ -335,12 +431,26 @@ class AIAgent:
                 response = await self._call_llm(text or "")
 
             if self.config.ai_debug:
-                logger.info("=== AI DEBUG: Response ===\n%s", response)
+                logger.debug("AI DEBUG: Response\n%s", response)
                 console.print("[bold cyan]━━━ AI DEBUG: Response ━━━[/bold cyan]")
                 console.print(response)
                 console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
 
             return self._parse_response(response)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.error(
+                    "AI analysis with media failed: 429 Too Many Requests "
+                    "(all %d retries exhausted)",
+                    self.config.max_retries_on_429,
+                )
+            else:
+                logger.warning(
+                    "AI analysis with media failed: HTTP %d %s",
+                    e.response.status_code,
+                    e.response.reason_phrase,
+                )
+            return AIAnalysisResult(is_violation=False, confidence=0.0)
         except Exception as e:
             logger.warning("AI analysis with media failed for message: %s", e)
             return AIAnalysisResult(is_violation=False, confidence=0.0)
@@ -349,19 +459,25 @@ class AIAgent:
         """Call the LLM and return raw response text."""
         from openai import NOT_GIVEN
 
-        completion = await self._client.chat.completions.create(
-            model=(
-                self.config.ollama_model
-                if self.config.provider == AIProvider.OLLAMA
-                else self.config.openai_model
-            ),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Сообщение для анализа:\n\n{text}"},
-            ],
-            temperature=0.1,
-            max_tokens=500,
-            response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+        async def _do_call() -> Any:
+            return await self._client.chat.completions.create(
+                model=(
+                    self.config.ollama_model
+                    if self.config.provider == AIProvider.OLLAMA
+                    else self.config.openai_model
+                ),
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Сообщение для анализа:\n\n{text}"},
+                ],
+                temperature=0.1,
+                max_tokens=500,
+                response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+            )
+
+        completion = await self._call_with_retry_on_429(
+            _do_call,
+            context="single text",
         )
         return completion.choices[0].message.content or ""
 
@@ -393,19 +509,25 @@ class AIAgent:
             },
         ]
 
-        completion = await self._client.chat.completions.create(
-            model=(
-                self.config.ollama_model
-                if self.config.provider == AIProvider.OLLAMA
-                else self.config.openai_model
-            ),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            temperature=0.1,
-            max_tokens=500,
-            response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+        async def _do_call() -> Any:
+            return await self._client.chat.completions.create(
+                model=(
+                    self.config.ollama_model
+                    if self.config.provider == AIProvider.OLLAMA
+                    else self.config.openai_model
+                ),
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.1,
+                max_tokens=500,
+                response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+            )
+
+        completion = await self._call_with_retry_on_429(
+            _do_call,
+            context="vision",
         )
         return completion.choices[0].message.content or ""
 
@@ -489,7 +611,7 @@ class AIAgent:
         )
 
         if self.config.ai_debug:
-            logger.info("=== AI DEBUG: Batch Request (%d msgs) ===\n%s", len(non_empty), batch_payload)
+            logger.debug("AI DEBUG: Batch Request (%d msgs, payload_size=%d bytes)", len(non_empty), len(batch_payload))
             console.print(f"[bold yellow]━━━ AI DEBUG: Batch Request ({len(non_empty)} msgs) ━━━[/bold yellow]")
             console.print(batch_payload[:2000] + ("..." if len(batch_payload) > 2000 else ""))
             console.print("[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]")
@@ -503,7 +625,7 @@ class AIAgent:
             )
 
             if self.config.ai_debug:
-                logger.info("=== AI DEBUG: Batch Response ===\n%s", raw_response)
+                logger.debug("AI DEBUG: Batch Response (size=%d bytes)", len(raw_response))
                 console.print("[bold cyan]━━━ AI DEBUG: Batch Response ━━━[/bold cyan]")
                 console.print(raw_response[:2000] + ("..." if len(raw_response) > 2000 else ""))
                 console.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]")
@@ -528,10 +650,9 @@ class AIAgent:
 
         except Exception as e:
             logger.warning("Batch AI analysis failed: %s", e)
-            # Fall back to individual analysis for each non-empty text
-            logger.info("Falling back to individual analysis for %d messages", len(non_empty))
-            for orig_idx, text in non_empty:
-                results[orig_idx] = await self.analyze_text(text)
+            # Results for non-empty texts remain as default (is_violation=False)
+            # Note: 429 errors are handled by _call_with_retry_on_429 inside _call_llm_batch,
+            # so if we get here it's a non-retryable error.
 
         if progress_callback:
             progress_callback(len(texts), len(texts))
@@ -545,19 +666,25 @@ class AIAgent:
         # Estimate max_tokens: ~100 tokens per message + buffer
         estimated_tokens = max(500, len(json.loads(batch_payload)) * 120)
 
-        completion = await self._client.chat.completions.create(
-            model=(
-                self.config.ollama_model
-                if self.config.provider == AIProvider.OLLAMA
-                else self.config.openai_model
-            ),
-            messages=[
-                {"role": "system", "content": BATCH_SYSTEM_PROMPT},
-                {"role": "user", "content": batch_payload},
-            ],
-            temperature=0.1,
-            max_tokens=estimated_tokens,
-            response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+        async def _do_call() -> Any:
+            return await self._client.chat.completions.create(
+                model=(
+                    self.config.ollama_model
+                    if self.config.provider == AIProvider.OLLAMA
+                    else self.config.openai_model
+                ),
+                messages=[
+                    {"role": "system", "content": BATCH_SYSTEM_PROMPT},
+                    {"role": "user", "content": batch_payload},
+                ],
+                temperature=0.1,
+                max_tokens=estimated_tokens,
+                response_format=({"type": "json_object"} if self.config.provider == AIProvider.OPENAI else NOT_GIVEN),
+            )
+
+        completion = await self._call_with_retry_on_429(
+            _do_call,
+            context="batch",
         )
         return completion.choices[0].message.content or ""
 
